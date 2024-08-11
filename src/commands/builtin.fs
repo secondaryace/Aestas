@@ -187,4 +187,13 @@ module AestasBuiltinCommands =
                     Number (x % y)
                 | _ -> env.log "Invalid arguments"; Unit
             member this.Help = "Caculate numbers, just for fun"
-    
+    [<AestasCommand("ip", AestasCommandDomain.All)>]
+    type Ip() =
+        interface ICommand with
+            member this.Execute (env, args) =
+                let ip = 
+                    let ipv6 = (bash "curl 6.ipw.cn")
+                    let ipv4 = (bash "curl 4.ipw.cn")
+                    ipv4 + "  当前ipv6： " + ipv6
+                env.log $"""当前ipv4 ：{ip}"""; Unit
+            member this.Help = "Prints the IP address"
