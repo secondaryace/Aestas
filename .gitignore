@@ -9,6 +9,5 @@ logs/*
 profiles/*
 src/bots/*
 src/.obsolete/*
-config.json
-.fake
+
 aestas.fsproj
