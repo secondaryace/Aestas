@@ -4,8 +4,11 @@ bin/
 obj/
 Properties/
 media/*
+temp/*
+logs/*
 profiles/*
-deviceinfo.json
-keystore.json
+src/bots/*
+src/.obsolete/*
 config.json
 .fake
+aestas.fsproj

@@ -1,4 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
     <OutputType>Exe</OutputType>
@@ -7,25 +7,23 @@
     <LangVersion>preview</LangVersion>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <ServerGarbageCollection>true</ServerGarbageCollection>
+    <NoWarn>3535, 3536</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Include="src\prim.fs" />
-    <Compile Include="src\api\msTTS.fs" />
-    <Compile Include="src\api\fuyuimage.fs" />
-    <Compile Include="src\api\chat.fs" />
-    <Compile Include="src\api\unitClient.fs" />
-    <Compile Include="src\api\cohere.fs" />
-    <Compile Include="src\api\gemini.fs" />
-    <Compile Include="src\api\ernie.fs" />
-    <Compile Include="src\types.fs" />
-    <Compile Include="src\commands\lexer.fs" />
-    <Compile Include="src\commands\parser.fs" />
-    <Compile Include="src\commands\command.fs" />
-    <Compile Include="src\commands\builtin.fs" />
-    <Compile Include="src\msg-parser.fs" />
-    <Compile Include="src\bot.fs" />
-    <Compile Include="src\cli.fs" />
+    <Compile Include="src/prim.fs" />
+    <Compile Include="src/core.fs" />
+    <Compile Include="src/auto-init.fs" />
+    <Compile Include="src/llms/gemini.fs" />
+    <Compile Include="src/adapters/lagrange.fs" />
+    <Compile Include="src/plugins/ms-tts.fs" />
+    <Compile Include="src/plugins/gsv-acgnai.fs" />
+    <Compile Include="src/commands/todays-diet.fs" />
+    <Compile Include="src/bots/vespera.fs" />
+    <Compile Include="src/bots/ganyu.fs" />
+    <Compile Include="src/bots/furina.fs" />
+    <Compile Include="src/bots/actLinuxTerminal.fs" />
+    <Compile Include="src/cli.fs" />
   </ItemGroup>
 
   <ItemGroup>
@@ -34,7 +32,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="ref\Lagrange.Core\Lagrange.Core\Lagrange.Core.csproj" />
+    <ProjectReference Include="ref/Lagrange.Core/Lagrange.Core/Lagrange.Core.csproj" />
   </ItemGroup>
 
   <ItemGroup>
