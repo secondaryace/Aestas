@@ -14,14 +14,13 @@ module Cli =
     let main(args) =
         AutoInit.init()
         Console.CursorVisible <- false
-        logInfo["Cli"] "Console Started"
+        logInfo[0] "Console Started"
         logTrace[0] "Test0"
         logDebug[0] "Test1"
         logInfo[0] "Test2"
         logWarn[0] "Test3"
         logError[0] "Test4"
         logFatal[0] "Test5"
-        for i in 0..10 do logInfo[0] $"Test_{i}PanelView(0, 0, Console.WindowWidth, Console.WindowHeight)PanelView(0, 0, Console.WindowWidth, Console.WindowHeight)PanelView(0, 0, Console.WindowWidth, Console.WindowHeight)PanelView(0, 0, Console.WindowWidth, Console.WindowHeight)"
         let panel = PanelView(0, 0, Console.WindowWidth, Console.WindowHeight)
         TextView("Aestas", None, Console.WindowWidth-6, 0) |> panel.Append
         TextView("[TAB]", Some ConsoleColor.DarkGray, 21, 0) |> panel.Append
@@ -49,6 +48,12 @@ module Cli =
                     VerticalListView(b.Domains.Values |> Array.ofSeq, 
                         (fun this t -> stringDrawCursor $"{this.DomainId}: {this.Name}" t), 
                         ConsoleKey.K, ConsoleKey.J, 4, 3, Console.WindowWidth-17, 5)
+                    |> p.Append
+                    TextView("Commands:", Some ConsoleColor.Gray, 0, 8) |> p.Append
+                    TextView("([Z]↓,[X]↑)", Some ConsoleColor.DarkGray, 10, 8) |> p.Append
+                    VerticalListView(b.Commands.Keys |> Array.ofSeq, 
+                        (fun this t -> stringDrawCursor $"{this}" t), 
+                        ConsoleKey.X, ConsoleKey.Z, 4, 9, Console.WindowWidth-17, 5)
                     |> p.Append
                     p),
                 ConsoleKey.UpArrow, ConsoleKey.DownArrow, 0, 0, Console.WindowWidth, Console.WindowHeight-2, 13) :> CliView

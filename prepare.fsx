@@ -1,8 +1,8 @@
 open System
 open System.IO
 open System.Collections.Generic
-let ifExistThenGetFiles path = 
-    if Directory.Exists path then Directory.GetFiles(path) else [||]
+let getFiles path = 
+    if Directory.Exists path then Directory.GetFiles path |> Array.filter (fun s -> s.EndsWith ".fs") else [||]
 let ( @@ ) (a: 't[]) (b: 't[]) = Array.concat [a; b]
 let checkDir dir = if Directory.Exists dir then () else Directory.CreateDirectory dir |> ignore
 checkDir "src"
@@ -11,11 +11,11 @@ checkDir "src/bots"
 checkDir "src/commands"
 checkDir "src/llms"
 checkDir "src/plugins"
-let adapters = ifExistThenGetFiles "src/adapters/"
-let bots = ifExistThenGetFiles "src/bots/"
-let commands = ifExistThenGetFiles "src/commands/"
-let llms = ifExistThenGetFiles "src/llms/"
-let plugins = ifExistThenGetFiles "src/plugins/"
+let adapters = getFiles "src/adapters/"
+let bots = getFiles "src/bots/"
+let commands = getFiles "src/commands/"
+let llms = getFiles "src/llms/"
+let plugins = getFiles "src/plugins/"
 let all = adapters @@ bots @@ commands @@ llms @@ plugins
 let proj = ResizeArray<string>()
 let nuget = ResizeArray<string*string>()
@@ -64,15 +64,12 @@ let propertyGroup = """  <PropertyGroup>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <NoWarn>3535, 3536</NoWarn>
-  </PropertyGroup>"""
+</PropertyGroup>"""
 let itemGroupStart = """  <ItemGroup>"""
 let itemGroupEnd = """  </ItemGroup>"""
 let compileInclude x = $"""    <Compile Include="{x}" />"""
 let packageReference n v = $"""    <PackageReference Include="{n}" Version="{v}" />"""
 let projectReference p = $"""    <ProjectReference Include="{p}" />"""
-let fsharpCore = """  <ItemGroup>
-    <PackageReference Update="FSharp.Core" Version="8.0.300" />
-  </ItemGroup>"""
 let xml = [
     [projectStart]
     [spaceLine]
@@ -100,8 +97,6 @@ let xml = [
     [itemGroupStart]
     proj |> foldIList (fun list x -> projectReference x::list) []
     [itemGroupEnd]
-    [spaceLine]
-    [fsharpCore]
     [spaceLine]
     [projectEnd]
 ]

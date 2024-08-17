@@ -34,6 +34,11 @@ module rec AestasLagrangeBot =
         uid = member'.Uin
         name = if member'.MemberCard |> String.IsNullOrEmpty then member'.MemberName else member'.MemberCard
     }
+    // fix the s**t sequence problem
+    type LagrangeQQSequenceFix =
+    | SequenceOk
+    | SequenceIll
+    | SequenceReturned of uint32
     type LagrangeChatGroup(bot: BotContext, private': bool, gid: uint) as this =
         inherit AestasChatDomain()
         let messages = LagrangeMessageCollection this
@@ -51,10 +56,16 @@ module rec AestasLagrangeBot =
             match entity with
             | :? TextEntity as t -> AestasText t.Text
             | :? ImageEntity as i -> AestasImage (i.ImageUrl |> bytesFromUrl, "image/jpeg", int i.PictureSize.X, int i.PictureSize.Y)
-            | :? RecordEntity as a -> AestasAudio (a.AudioUrl |> bytesFromUrl, "")
+            | :? RecordEntity as a -> AestasAudio (a.AudioUrl |> bytesFromUrl, "audio/amr")
             | :? VideoEntity as v -> AestasVideo (v.VideoUrl |> bytesFromUrl, "") 
             | :? MentionEntity as m -> 
                 AestasMention {uid = m.Uin; name = m.Name.Substring(1)}
+            | :? ForwardEntity as f ->
+                logInfo[0] $"ForwardEntity: {f.MessageId}"
+                match messages 
+                    |> ArrList.tryFindBack (fun m -> (m :?> LagrangeMessage).Sequence = f.Sequence) with
+                | Some m -> AestasText "#[quote not found]"//m.Parse() |> AestasQuote
+                | None -> AestasText "#[quote not found]"
             | _ -> AestasText "not supported"
         member this.ParseAestasContent (content: AestasContent): IMessageEntity =
             match content with
@@ -67,13 +78,59 @@ module rec AestasLagrangeBot =
                     |> Array.find (fun m' -> m'.uid = m.uid)).name, m.uid)
             | AestasMappingContent c -> c.Convert this.Bot.Value this |> this.ParseAestasContent
             | _ -> TextEntity "not supported"
-        override this.Send msgs = 
-            async { 
+        member val MessageCacheQueue = List<(IMessageAdapter -> unit)*uint32>() with get, set
+        override this.Send callback msgs = 
+            async {
                 let msgs = msgs |> List.map this.ParseAestasContent
                 let chain = (if private' then MessageBuilder.Friend(gid) else MessageBuilder.Group(gid)).Build()
                 chain.AddRange msgs
+                // return value is not useful in private chat
                 let! m = bot.SendMessage chain |> Async.AwaitTask
-                return (messages, chain) |> LagrangeMessage :> IMessageAdapter |> Ok
+                if private' then
+                    let ret = (messages, chain, SequenceIll) |> LagrangeMessage
+                    // s**t way to fix s**t thing
+                    // performance not good, comment it
+                    // async {
+                    //     Threading.Thread.Sleep 1500
+                    //     let! smsgs = bot.GetRoamMessage(chain, 5u) |> Async.AwaitTask
+                    //     let smsg =
+                    //         smsgs |> ArrList.tryFindBack (fun m -> 
+                    //             if m.FriendUin = self.uid then
+                    //                 if m.Count = chain.Count then
+                    //                     if m.ToPreviewText() = chain.ToPreviewText() then true else false
+                    //                 else false
+                    //             else false)
+                    //     let tmsgi = 
+                    //         (messages :> arrList<IMessageAdapter>) 
+                    //         |> ArrList.tryFindIndexBack (fun m -> m = ret)
+                    //     match smsg, tmsgi with
+                    //     | Some m, Some i ->
+                    //         messages[i] <- (messages, m, SequenceOk) |> LagrangeMessage :> IMessageAdapter
+                    //     | _ -> ()
+                    // } |> Async.Start
+                    callback ret
+                    return Ok ()
+                else 
+                    this.MessageCacheQueue.Add(callback, m.Sequence.Value)
+                    return Ok ()
+            }
+        override this.Recall msg =
+            async {
+                if private' then return false else
+                match 
+                        (messages :> arrList<IMessageAdapter>) 
+                        |> ArrList.tryFindIndexBack (fun x -> x.MessageId = msg.mid) 
+                    with
+                    | Some i -> 
+                        match! 
+                            bot.RecallGroupMessage (messages[i] :?> LagrangeMessage).Chain 
+                            |> Async.AwaitTask 
+                        with
+                        | true ->
+                            messages.RemoveAt i
+                            return true
+                        | false -> return false
+                    | None -> return false
             }
         override _.Self = self
         override _.Virtual = {name = "Virtual"; uid = UInt32.MaxValue}
@@ -94,10 +151,13 @@ module rec AestasLagrangeBot =
             member this.Parse() = this.ToArray() |> Array.map (fun x -> x.Parse())
             member _.Domain = domain
         end
-    type LagrangeMessage(collection: LagrangeMessageCollection, messageChain: MessageChain) =
+    type LagrangeMessage(collection: LagrangeMessageCollection, messageChain: MessageChain, seqFix: LagrangeQQSequenceFix) =
         let cachedSender = 
             if messageChain.GroupUin.HasValue then parseLagrangeMember messageChain.GroupMemberInfo
             else parseLagrangeFriend messageChain.FriendInfo
+        member _.Sequence = messageChain.Sequence
+        member _.Chain = messageChain
+        member _.SeqFix = seqFix
         interface IMessageAdapter with
             member _.MessageId = messageChain.MessageId
             member _.SenderId = cachedSender.uid
@@ -106,6 +166,12 @@ module rec AestasLagrangeBot =
                 content = messageChain |> List.ofSeq |> List.map collection.Domain.ParseLagrangeEntity
                 mid = messageChain.MessageId
                 }
+            member this.Mention uid = 
+                messageChain |> Seq.exists (fun entity -> 
+                    match entity with
+                    | :? MentionEntity as m when m.Uin = uid -> true
+                    | _ -> false
+                )
             member _.Collection = collection
             member this.Command = 
                 if messageChain.GroupUin.HasValue then
@@ -214,18 +280,32 @@ module rec AestasLagrangeBot =
                         if pair.Value.ContainsKey(event.Chain.FriendUin) then
                             let chat = pair.Value[event.Chain.FriendUin]
                             let message = 
-                                LagrangeMessage(chat.Messages :?> LagrangeMessageCollection, event.Chain)
+                                LagrangeMessage(chat.Messages :?> LagrangeMessageCollection, event.Chain, SequenceOk)
                             chat.OnReceiveMessage message |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
                     )
                 ) |> bot.Invoker.add_OnFriendMessageReceived
                 (fun _ (event: EventArg.GroupMessageEvent) -> 
                     groupChats
                     |> Seq.iter (fun pair -> 
-                        if pair.Value.ContainsKey(event.Chain.GroupUin.Value) && event.Chain.FriendUin <> bot.BotUin then
+                        if pair.Value.ContainsKey(event.Chain.GroupUin.Value) then
                             let chat = pair.Value[event.Chain.GroupUin.Value]
-                            let message = 
-                                LagrangeMessage(chat.Messages :?> LagrangeMessageCollection, event.Chain)
-                            chat.OnReceiveMessage message |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
+                            if event.Chain.FriendUin = bot.BotUin then
+                                match
+                                    chat.MessageCacheQueue |> ArrList.tryFindBack (fun (callback, seq) -> 
+                                        if seq = event.Chain.Sequence then 
+                                            callback (LagrangeMessage(chat.Messages :?> LagrangeMessageCollection, event.Chain, SequenceOk))
+                                            true
+                                        else false
+                                    )
+                                with
+                                | Some (callback, seq) -> 
+                                    chat.MessageCacheQueue.Remove(callback, seq) |> ignore
+                                    LagrangeMessage(chat.Messages :?> LagrangeMessageCollection, event.Chain, SequenceOk) |> callback
+                                | None -> ()
+                            else
+                                let message = 
+                                    LagrangeMessage(chat.Messages :?> LagrangeMessageCollection, event.Chain, SequenceOk)
+                                chat.OnReceiveMessage message |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
                     )
                 ) |> bot.Invoker.add_OnGroupMessageReceived
                 (fun _ (event: EventArg.FriendPokeEvent) -> 
@@ -244,9 +324,10 @@ module rec AestasLagrangeBot =
                     |> Seq.iter (fun pair -> 
                         if pair.Value.ContainsKey(event.GroupUin) then
                             let chat = pair.Value[event.GroupUin]
-                            let message = 
-                                LagrangeMessage(chat.Messages :?> LagrangeMessageCollection, MessageBuilder.FakeGroup(event.OperatorUin, event.TargetUin).Text("(poke you)").Build())
-                            chat.OnReceiveMessage message |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
+                            match chat.Bot with
+                            | None -> ()
+                            | Some bot ->
+                                bot.SelfTalk chat [AestasText "(poke you)"] |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
                     )
                 ) |> bot.Invoker.add_OnGroupPokeEvent
             member _.FetchDomains() = 

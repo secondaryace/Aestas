@@ -84,39 +84,24 @@ module Gemini =
                     topK = gs[model].top_k
                 }
         let contentsCache = Dictionary<AestasChatDomain, arrList<struct(GContent*uint64)>>()
+        let parseContents (domain: AestasChatDomain) (contents: AestasContent list) =
+            let parts = Array.zeroCreate<GPart> contents.Length
+            let iAmMLLM i = function
+            | AestasImage(bs, mime, w, h) -> 
+                parts[i] <- InlineData {inline_data = {mime_type = mime; data = bs |> Convert.ToBase64String}}
+            | x -> 
+                parts[i] <- Text {text = Builtin.modelInputConverters domain.Messages x}// !
+            contents |> List.iteri iAmMLLM
+            {role = "user"; parts = parts}
         interface ILanguageModelClient with
-            member this.SendContent (bot, domain, content) =
+            member this.CacheMessage bot domain message =
                 if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList<struct(GContent*uint64)>())
-                (this :> ILanguageModelClient)
-                    .Send(bot, domain, {mid = (if contentsCache[domain].Count = 0 then 0UL else snd' (contentsCache[domain][^0])); sender = domain.Virtual; content = content})
-            member this.Send (bot, domain, message) =
+                contentsCache[domain].Add struct(message.content |> parseContents domain, message.mid)
+            member this.CacheContents bot domain content =
+                if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList<struct(GContent*uint64)>())
+                contentsCache[domain].Add struct(content |> parseContents domain, 0UL)
+            member this.GetReply bot domain =
                 async {
-                    if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList<struct(GContent*uint64)>())
-                    let parseMsg (msg: AestasMessage) =
-                        let parts = Array.zeroCreate<GPart> msg.content.Length
-                        let iAmMLLM i = function
-                        | AestasImage(bs, mime, w, h) -> 
-                            parts[i] <- InlineData {inline_data = {mime_type = mime; data = bs |> Convert.ToBase64String}}
-                        | x -> 
-                            parts[i] <- Text {text = Builtin.modelInputConverters domain.Messages x}
-                        msg.content |> List.iteri iAmMLLM
-                        {role = (if msg.sender.uid = domain.Self.uid then "model" else "user"); parts = parts}
-                    let selfUid = domain.Self.uid
-                    let latestMid = if contentsCache[domain].Count = 0 then 0UL else snd' (contentsCache[domain][^0])
-                    let rec updateCache i =
-                        if i >= domain.Messages.Count then ()
-                        else
-                            let msg = domain.Messages[i].Parse()
-                            if msg.sender.uid = selfUid then () else
-                            struct(msg |> parseMsg, msg.mid) |> contentsCache[domain].Add
-                            updateCache (i+1)
-                    let rec reverseFindIndex mid i =
-                        if i = -1 then 0
-                        elif domain.Messages[i].MessageId = mid then i+1
-                        else reverseFindIndex mid (i-1)
-                    domain.Messages.Count-1 |> reverseFindIndex latestMid |> updateCache
-                    let msgCache = parseMsg message
-                    contentsCache[domain].Add struct(msgCache, message.mid)
                     let countCache = contentsCache[domain].Count
                     let! response = 
                         let apiLink = 
@@ -127,8 +112,7 @@ module Gemini =
                             {role = "system"; parts = [|Text {text = bot.SystemInstruction}|]}
                         let messages = 
                             {contents = temp; safetySettings = profile.safetySettings; systemInstruction = system; generationConfig = generationConfig}
-                        logDebug[0] (jsonSerialize(messages))
-                        postRequest profile apiLink (jsonSerialize(messages))
+                        postRequest profile apiLink (jsonSerialize messages)
                     match response with
                     | Ok result -> 
                         let response = 
@@ -137,14 +121,13 @@ module Gemini =
                             | Text t -> t.text.Replace("\n\n", "\n")
                             | InlineData _ -> ""
                             with ex -> 
-                                logError[this] $"Gemini response parse failed: {ex}"
+                                logError[0] $"Gemini response parse failed: {ex}"
                                 "..."
-                        logDebug[0] result
                         return response.TrimEnd() |> Builtin.modelOutputParser bot domain |> Ok, 
                         fun msg -> 
                             contentsCache[domain].Insert(countCache, struct({role = "model"; parts = [|Text {text = response}|]}, msg.mid))
                     | Error result ->
-                        logError[this] $"Gemini request failed: {result}" 
+                        logError[0] $"Gemini request failed: {result}" 
                         return Error result, ignore
                 }
             member _.ClearCache() = contentsCache.Clear()

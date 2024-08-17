@@ -1,11 +1,19 @@
 namespace Aestas
 open System
+open System.IO
 open System.Collections.Generic
 open System.Reflection
 open Aestas.Prim
 open Aestas.Core
 open Aestas.Core.Logger
 
+/// AutoInit is a type-safe auto initializer.
+/// It will scan all types in the current app domain and initialize all types that implement IAutoInit.
+/// <summary>Impl IAutoInit<AestasBot, unit> -> bot</summary>
+/// <summary>Impl IAutoInit<(ContentParam->IProtocolSpecifyContent)*string*string, unit> -> protocolContentCtors</summary>
+/// <summary>Impl IAutoInit<(ContentParam->IAestasMappingContent)*string*string, unit> -> mappingContentCtors</summary>
+/// <summary>Impl IAutoInit<IProtocolAdapter*string, unit> -> protocols</summary>
+/// <summary>Impl IAutoInit<ICommand, unit> -> commands</summary>
 module AutoInit =
     type IAutoInit<'t, 'tArg> =
         static abstract member Init: 'tArg -> 't
@@ -17,6 +25,14 @@ module AutoInit =
 
     let init () =
         logInfo["AutoInit"] "Initializing"
+        if Directory.Exists "extensions" then
+            Directory.GetFiles "extensions"
+            |> Array.filter (fun x -> x.EndsWith ".dll")
+            |> Array.iter (fun x -> 
+                try
+                Path.Combine(Environment.CurrentDirectory, x) |> Assembly.LoadFile |> ignore
+                logInfo["AutoInit"] $"Loaded assembly {x}"
+                with ex -> logError["AutoInit"] $"Error loading assembly {x} {ex}")
         let types = 
             AppDomain.CurrentDomain.GetAssemblies()
             |> Array.collect (fun a -> a.GetTypes())

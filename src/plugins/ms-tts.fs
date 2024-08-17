@@ -51,7 +51,7 @@ module MsTts =
                 match bot.ExtraData("mstts") with
                 | Some (:? MsTts_Profile as profile) -> 
                     let voice = getVoice profile content
-                    AestasAudio(voice, "audio/wav")
+                    AestasAudio(voice, "audio/ogg")
                 | _ -> AestasText("Error: No mstts profile found")
         interface IAutoInit<(ContentParam->IAestasMappingContent)*string*string, unit> with
             static member Init _ = 

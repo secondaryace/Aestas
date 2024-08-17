@@ -9,5 +9,9 @@ logs/*
 profiles/*
 src/bots/*
 src/.obsolete/*
+extensions/Aestas.Test.CSharp/.vs/*
+extensions/Aestas.Test.CSharp/obj/*
+extensions/Debug/*
+extensions/Release/*
 
 aestas.fsproj

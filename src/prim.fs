@@ -94,6 +94,38 @@ module Prim =
             let result = arrList<'t>()
             result.Add value
             result
+        let inline tryFind (predicate: 't -> bool) (list: arrList<'t>) =
+            let rec go i =
+                if i >= list.Count then None
+                elif predicate list[i] then Some list[i]
+                else go (i+1)
+            go 0
+        let inline tryFindBack (predicate: 't -> bool) (list: arrList<'t>) =
+            let rec go i =
+                if i < 0 then None
+                elif predicate list[i] then Some list[i]
+                else go (i-1)
+            go (list.Count-1)
+        let inline tryFindIndex (predicate: 't -> bool) (list: arrList<'t>) =
+            let rec go i =
+                if i >= list.Count then None
+                elif predicate list[i] then Some i
+                else go (i+1)
+            go 0
+        let inline tryFindIndexBack (predicate: 't -> bool) (list: arrList<'t>) =
+            let rec go i =
+                if i < 0 then None
+                elif predicate list[i] then Some i
+                else go (i-1)
+            go (list.Count-1)
+        let inline find (predicate: 't -> bool) (list: arrList<'t>) =
+            match list |> tryFind predicate with
+            | Some x -> x
+            | None -> failwith "Not found"
+        let inline findBack (predicate: 't -> bool) (list: arrList<'t>) =
+            match list |> tryFindBack predicate with
+            | Some x -> x
+            | None -> failwith "Not found"
     module Dict =
         let inline deconstructPair (p: KeyValuePair<'k, 'v>) = p.Deconstruct()
         let inline iter (action: 'k -> 'v -> unit) (dict: IReadOnlyDictionary<'k, 'v>) =

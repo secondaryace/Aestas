@@ -75,6 +75,7 @@ module rec Core =
         abstract member MessageId: uint64 with get
         abstract member SenderId: uint32 with get
         abstract member Parse: unit -> AestasMessage
+        abstract member Mention: uint32 -> bool 
         abstract member Command: string option with get
         abstract member Collection: IMessageAdapterCollection with get
         abstract member Preview: string with get
@@ -102,9 +103,10 @@ module rec Core =
         abstract member Virtual: AestasChatMember with get
         abstract member Members: AestasChatMember[] with get
         abstract member Bot: AestasBot option with get, set
-        abstract member Send: AestasContent list -> Async<Result<IMessageAdapter, string>>
+        abstract member Send: (IMessageAdapter -> unit) -> AestasContent list -> Async<Result<unit, string>>
+        abstract member Recall: AestasMessage -> Async<bool>
         abstract member Name: string with get
-        abstract member OnReceiveMessage: IMessageAdapter -> Async<Result<IMessageAdapter, string>>
+        abstract member OnReceiveMessage: IMessageAdapter -> Async<Result<unit, string>>
         default this.OnReceiveMessage msg = 
             async {
                 match this.Bot with
@@ -114,23 +116,29 @@ module rec Core =
                     | Error e, _ -> return Error e
                     | Ok [], _ -> 
                         this.Messages.Add msg
-                        return Ok msg
+                        return Ok ()
                     | Ok reply, callback -> 
-                        match! reply |> this.Send with
-                        | Error e -> return Error e
-                        | Ok rmsg ->
+                        return! reply |> this.Send (fun rmsg ->
                             this.Messages.Add msg
                             this.Messages.Add rmsg
                             rmsg.Parse() |> callback
-                            return Ok msg
+                        )
+                        // match! reply |> this.Send with
+                        // | Error e -> return Error e
+                        // | Ok rmsg ->
+                        //     this.Messages.Add msg
+                        //     this.Messages.Add rmsg
+                        //     rmsg.Parse() |> callback
+                        //     return Ok msg
 
             }
     type AestasChatDomains = Dictionary<uint32, AestasChatDomain>
-    type AestasBotContentLoadStrategy =
+    type BotContentLoadStrategy =
         | StrategyLoadNone
+        | StrategyLoadOnlyMentionedOrPrivate
         | StrategyLoadAll
         | StrategyLoadByPredicate of (IMessageAdapter -> bool)
-    type AestasBotReplyStrategy = 
+    type BotMessageReplyStrategy = 
         /// Won't reply to any message
         | StrategyReplyNone
         /// Only reply to messages that mentioned the bot or private messages
@@ -139,7 +147,10 @@ module rec Core =
         | StrategyReplyAll
         /// Reply to messages whose domain ID is in the whitelist
         | StrategyReplyByPredicate of (AestasMessage -> bool)
-    type AestasBotContentParseStrategy =
+    type BotMessageCacheStrategy =
+        | StrategyCacheOnlyMentionedOrPrivate
+        | StrategyCacheAll
+    type BotContentParseStrategy =
         /// Parse all content to plain text
         | StrategyParseAllToPlainText
         /// Parse all content to AestasContent, ignore errors
@@ -148,6 +159,10 @@ module rec Core =
         | StrategyParseAndAlertError
         /// Parse all content to AestasContent, parse errors format to plain text, like [func: content] -> content
         | StrategyParseAndDestructErrorFormat
+    type BotContextTrimStrategy =
+        | StrategyTrimWhenExceedLength of int
+        | StrategyTrimSummarize of int
+        | StrategyTrimNever
     /// Used in Aestas.Core <-> Model
     /// Implement this interface to box any object to a AestasContent.
     /// For example, model returns [mstts@emotion=Cheerful: Hello], use this to store and convert is to AestasAudio
@@ -174,8 +189,8 @@ module rec Core =
         | AestasAudio of byte[]*string
         | AestasVideo of byte[]*string
         | AestasMention of AestasChatMember
-        | AestasQuote of uint64
-        | AestasFold of IMessageAdapterCollection
+        | AestasQuote of AestasMessage
+        | AestasFold of AestasMessage[]
         | AestasMappingContent of IAestasMappingContent
         | ProtocolSpecifyContent of IProtocolSpecifyContent
     type AestasMessage = {
@@ -240,7 +255,7 @@ module rec Core =
                     let command = message.Command.Value
                     Command.excecute {
                         bot = this; domain = domain
-                        log = AestasText >> List.singleton >> domain.Send >> Async.Ignore >> Async.Start
+                        log = AestasText >> List.singleton >> domain.Send ignore >> Async.Ignore >> Async.Start
                         privilege = 
                             if this.CommandPrivilegeMap.ContainsKey message.SenderId then
                                 this.CommandPrivilegeMap[message.SenderId]
@@ -254,24 +269,26 @@ module rec Core =
                         | StrategyLoadNone -> message.ParseAsPlainText()
                         | StrategyLoadAll ->  message.Parse()
                         | StrategyLoadByPredicate p when p message -> message.Parse()
+                        | StrategyLoadOnlyMentionedOrPrivate when message.Mention domain.Self.uid || domain.Private -> message.Parse()
                         | _ -> message.ParseAsPlainText()
                     let message =
                         match this.PrefixBuilder with
                         | Some b -> b this message
                         | None -> message
+                    model.CacheMessage this domain message
                     match this.ReplyStrategy with
                     | StrategyReplyOnlyMentionedOrPrivate when
                         message.content |> List.exists 
                             (function 
                             | AestasMention m when m.uid = domain.Self.uid -> true 
                             | _ -> false) ->
-                        return! model.Send(this, domain, message)
+                        return! model.GetReply this domain
                     | StrategyReplyOnlyMentionedOrPrivate when domain.Private ->
-                        return! model.Send(this, domain, message)
+                        return! model.GetReply this domain
                     | StrategyReplyAll ->
-                        return! model.Send(this, domain, message)
+                        return! model.GetReply this domain
                     | StrategyReplyByPredicate p when p message ->
-                        return! model.Send(this, domain, message)
+                        return! model.GetReply this domain
                     | _ -> 
                         return Ok [], ignore
             }
@@ -281,45 +298,44 @@ module rec Core =
                 | _ when groups.ContainsValue domain |> not -> return Error "This domain hasn't been added to this bot"
                 | None -> return Error "No model binded to this bot"
                 | Some model ->
-                    match! model.SendContent(this, domain, content) with
+                    model.CacheContents this domain content
+                    match! model.GetReply this domain with
                     | Error e, _ -> return Error e
                     | Ok rmsg, callback -> 
-                        match! rmsg |> domain.Send with
-                        | Error e -> return Error e
-                        | Ok rmsg ->
+                        return! rmsg |> domain.Send (fun rmsg ->
                             domain.Messages.Add rmsg
                             rmsg.Parse() |> callback
-                            return Ok rmsg
+                        )
             }
         member this.ClearCachedContext(domain: AestasChatDomain) = 
             match this.Model with
             | None -> ()
             | Some model -> model.ClearCache()
             domain.Messages.Clear()
+            GC.Collect()
     type GenerationConfig = {
         temperature: float
         max_length: int
         top_k: int
         top_p: float
         }
+    type CacheMessageCallback = AestasMessage -> unit
     type ILanguageModelClient =
-        interface
-            /// bot * domain * message -> response * callback, with a certain sender in AestasMessage
-            abstract member Send: AestasBot*AestasChatDomain*AestasMessage -> Async<Result<AestasContent list, string>*(AestasMessage -> unit)>
-            /// bot * domain * contents -> response * callback, with no sender
-            abstract member SendContent: AestasBot*AestasChatDomain*(AestasContent list) -> Async<Result<AestasContent list, string>*(AestasMessage -> unit)>
-            abstract member ClearCache: unit -> unit
-        end
+        /// bot -> domain -> message -> response * callback, with a certain sender in AestasMessage
+        abstract member GetReply: bot: AestasBot -> domain: AestasChatDomain -> Async<Result<AestasContent list, string>*CacheMessageCallback>
+        /// bot * domain * message -> unit, with a certain sender in AestasMessage, dont send the message
+        abstract member CacheMessage: bot: AestasBot -> domain: AestasChatDomain -> message: AestasMessage -> unit
+        /// bot * domain * contents -> unit, with no sender, dont send the message
+        abstract member CacheContents: bot: AestasBot -> domain: AestasChatDomain -> contents: (AestasContent list) -> unit
+        abstract member ClearCache: unit -> unit
     type UnitClient() =
         interface ILanguageModelClient with
-            member _.Send (bot, domain, message) = 
+            member _.GetReply bot domain  = 
                 async {
-                    return Ok message.content, ignore
+                    return Ok [], ignore
                 }
-            member _.SendContent (bot, domain, contents) =
-                async {
-                    return Ok contents, ignore
-                }
+            member _.CacheMessage bot domain message = ()
+            member _.CacheContents bot domain contents = ()
             member _.ClearCache() = ()
         end
     type CommandAccessibleDomain = 
@@ -630,7 +646,7 @@ module rec Core =
             let messages = ConsoleMessageCollection(this)
             let cachedContext = arrList<string>()
             let self = {name = botName; uid = 1u}
-            override this.Send msgs = 
+            override this.Send callback msgs = 
                 async {
                     let sb = StringBuilder()
                     msgs |> List.iter (function
@@ -644,7 +660,19 @@ module rec Core =
                     | _ -> ())
                     let s = sb.ToString()
                     cachedContext.Add $"{self.name}: {s}"
-                    return (messages, self, s) |> ConsoleMessage :> IMessageAdapter |> Ok
+                    ConsoleMessage(messages, self, s) |> callback
+                    return Ok ()
+                }
+            override this.Recall msg = 
+                async { 
+                    match 
+                        (messages :> arrList<IMessageAdapter>) 
+                        |> ArrList.tryFindIndexBack (fun x -> x.MessageId = msg.mid) 
+                    with
+                    | Some i -> 
+                        messages.RemoveAt i
+                        return true
+                    | None -> return false
                 }
             override _.Private = true
             override _.DomainId = 0u
@@ -672,6 +700,7 @@ module rec Core =
             interface IMessageAdapter with
                 member val MessageId = collection.Domain.InnerMid <- collection.Domain.InnerMid+1UL; collection.Domain.InnerMid
                 member _.SenderId = sender.uid
+                member _.Mention _ = false
                 member this.Parse() = {sender = sender; content = [AestasText msg]; mid = (this :> IMessageAdapter).MessageId}
                 member _.Collection = collection
                 member this.Command = if msg.StartsWith '#' then msg.Substring 1 |> Some else None
@@ -811,7 +840,7 @@ module rec Core =
                                         tokens.Add v
                                         splitOp lp.operators (i+1)
                                 else if d.ContainsKey('\000') then
-                                    let (AValue t) = d['\000'] in tokens.Add t
+                                    match d['\000'] with AValue t -> tokens.Add t | _ -> failwith "Impossible"
                                     splitOp lp.operators i
                                 else if i = cache.Length then ()
                                 else tokens.Add (TokenError $"Unknown symbol {cache[if i = cache.Length then i-1 else i]}")
@@ -889,8 +918,7 @@ module rec Core =
                         let s = m.Span
                         if s.Length = 1 then
                             if d.ContainsKey(s[0]) then
-                                let (ADict d) = d[s[0]]
-                                d.Add('\000', AValue t)
+                                match d[s[0]] with ADict d -> d.Add('\000', AValue t) | _ -> failwith "Impossible"
                             else d.Add(s[0], AValue t)
                         else
                             if d.ContainsKey(s[0]) then
@@ -901,8 +929,7 @@ module rec Core =
                                     d[s[0]] <- ADict (Dictionary<char, MaybeDict>(d'))
                                 | _ -> ()
                             else d.Add(s[0], ADict (Dictionary<char, MaybeDict>()))
-                            let (ADict d) = d[s[0]]
-                            addToDict (m.Slice 1) t d
+                            match d[s[0]] with ADict d -> addToDict (m.Slice 1) t d | _ -> failwith "Impossible"
                     let rec makeDict (dictdict: Dictionary<char, MaybeDict>) (p: KeyValuePair<string, Token>) =
                         addToDict (p.Key.AsMemory()) p.Value dictdict
                     Seq.iter (makeDict dictdict) operators
@@ -957,8 +984,11 @@ module rec Core =
                 match eatSpace tokens with
                 | TokenPipe::r
                 | TokenRightPipe::r ->
-                    let (Call args), tokens, errors = parseTupleItem r errors
-                    Call (args.Head::l::args.Tail), tokens, errors
+                    let token, tokens, errors = parseTupleItem r errors
+                    match token with
+                    | Call args ->
+                        Call (args.Head::l::args.Tail), tokens, errors
+                    | _ -> failwith "Impossible"
                 | _ -> l, tokens, errors
             let rec parseExpr (tokens: Token list) (errors: string list) =
                 let rec go tokens acc errors =
@@ -1083,7 +1113,7 @@ module rec Core =
         | AestasAudio _ -> "#[audio: not supported]"
         | AestasVideo _ -> "#[video: not supported]"
         | AestasMention x -> $"#[mention: {x.name}]"
-        | AestasQuote x -> $"#[quote: {c.FirstOrDefault(fun y -> y.MessageId = x).Preview}]"
+        | AestasQuote x -> $"#[quote: {x}]"
         | AestasFold x -> $"#[foldedMessage: {x.Count} messages]"
         | ProtocolSpecifyContent x -> x.ToPlainText()
         | _ -> failwith "Could not handle this content type"
@@ -1191,15 +1221,6 @@ module rec Core =
                 sender = msg.sender
                 mid = msg.mid
             }
-        type MentionMappingContent(uid, name) =
-            interface IAestasMappingContent with
-                member _.ContentType = "mention"
-                member _.Convert bot domain = 
-                    AestasMention {uid = uid; name = name}
-            static member Constructor (domain: AestasChatDomain, params': (string*string) list, content: string) = 
-                match domain.Members |> Array.tryFind (fun x -> x.name = content) with
-                | Some member' -> MentionMappingContent(member'.uid, member'.name)
-                | None -> MentionMappingContent(0u, content)
 
         type VersionCommand() =
             interface ICommand with
@@ -1246,10 +1267,8 @@ module rec Core =
                     sb.ToString() |> env.log; Unit
         type DumpCommand() =
             interface ICommand with
-                member _.Name = "help"
-                member _.Help = """Dump the cached context
-    Usage: dump [reverseIndexStart=count-1] [reverseIndexEnd=0]
-"""
+                member _.Name = "dump"
+                member _.Help = """Dump the cached context | Usage: dump [reverseIndexStart=count-1] [reverseIndexEnd=0]"""
                 member _.AccessibleDomain = CommandAccessibleDomain.All
                 member _.Privilege = CommandPrivilege.Normal
                 member _.Execute env args =
@@ -1265,14 +1284,14 @@ module rec Core =
                         if i > t then ()
                         else
                             let m = msgs[i].Parse()
-                            sb.Append $"\n* {m.sender.name}:\n   {m.content}" |> ignore
+                            sb.Append $"\n* {m.sender.name}:\n   {m.content}\n  ({m.mid})" |> ignore
                             go (i+1)
                     go s
                     sb.ToString() |> env.log; Unit
         type ClearCommand() =
             interface ICommand with
                 member _.Name = "clear"
-                member _.Help = "List all commands"
+                member _.Help = "Clear the cached context"
                 member _.AccessibleDomain = CommandAccessibleDomain.All
                 member _.Privilege = CommandPrivilege.Normal                
                 member _.Execute env args =
@@ -1286,20 +1305,22 @@ module rec Core =
             "dump", DumpCommand()
             "clear", ClearCommand()
         ]
-        type BillionDollarBotClient() =
-            interface ILanguageModelClient with
-                member this.Send (bot, domain, message) = (this :> ILanguageModelClient).SendContent(bot, domain, message.content)
-                member _.SendContent (bot, domain, contents) =
-                    async {
-                        let strs =  contents |> List.map (modelInputConverters domain.Messages)
-                        strs |> String.concat " " |> modelOutputParser bot domain |> printfn "%A"
-                        let response =
-                            (strs |> String.concat " ")
-                                .Replace("You ", "~!@#")
-                                .Replace("I ", "You ")
-                                .Replace("~!@#", "I ")
-                                .Replace("you", "I ")
-                                .Replace("?", "!")
-                        return Ok [AestasText response], ignore
-                    }
-                member _.ClearCache() = ()
+        // type BillionDollarBotClient() =
+        //     interface ILanguageModelClient with
+        //         member this.SendMessage bot domain message = (this :> ILanguageModelClient).SendContents bot domain message.content
+        //         member _.SendContents bot domain contents =
+        //             async {
+        //                 let strs =  contents |> List.map (modelInputConverters domain.Messages)
+        //                 strs |> String.concat " " |> modelOutputParser bot domain |> printfn "%A"
+        //                 let response =
+        //                     (strs |> String.concat " ")
+        //                         .Replace("You ", "~!@#")
+        //                         .Replace("I ", "You ")
+        //                         .Replace("~!@#", "I ")
+        //                         .Replace("you", "I ")
+        //                         .Replace("?", "!")
+        //                 return Ok [AestasText response], ignore
+        //             }
+        //         member _.CacheMessage bot domain message = ()
+        //         member _.CacheContents bot domain contents = ()
+        //         member _.ClearCache() = ()
