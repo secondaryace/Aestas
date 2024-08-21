@@ -13,5 +13,6 @@ extensions/Aestas.Test.CSharp/.vs/*
 extensions/Aestas.Test.CSharp/obj/*
 extensions/Debug/*
 extensions/Release/*
+fable/*
 
 aestas.fsproj

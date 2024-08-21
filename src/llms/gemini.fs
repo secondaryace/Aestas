@@ -131,7 +131,13 @@ module Gemini =
                         return Error result, ignore
                 }
             member _.ClearCache() = contentsCache.Clear()
-
+            member _.RemoveCache domain messageID =
+                match
+                    contentsCache[domain] |>
+                    ArrList.tryFindIndexBack (fun x -> snd' x = messageID) 
+                with
+                | Some i -> contentsCache[domain].RemoveAt i
+                | None -> ()
 
 
 // type G10GenerationConfig = {maxOutputTokens: int; temperature: float; topP: float}

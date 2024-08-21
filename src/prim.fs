@@ -9,12 +9,14 @@ open System.Text.Unicode
 open System.Net.Http
 
 module Prim = 
-    let version = Version(0, 240701)
+    let version = Version(0, 240817)
     #if DEBUG
     let debug = true
     #else
     let debug = false
     #endif
+    let ( >.|> ) f g a b =  g b (f a b)
+    let ( >..|> ) f g a b = g (f a b) b
     let inline is<'t when 't: not struct> (a: obj) =
         match a with
         | :? 't -> true
@@ -37,6 +39,7 @@ module Prim =
         | :? byte as b -> b.ToString()
         | :? sbyte as b -> b.ToString()
         | :? string as s -> s
+        | :? Type as t -> t.Name
         | _ -> o.GetType().Name
     let fsOptions = 
         JsonFSharpOptions.Default()
@@ -44,7 +47,7 @@ module Prim =
             .WithUnionUnwrapRecordCases()
             .WithSkippableOptionFields(SkippableOptionFields.Always, true)
             .ToJsonSerializerOptions()
-    let _ =
+    do
         fsOptions.Encoder <- JavaScriptEncoder.Create(UnicodeRanges.All)
     let inline jsonDeserialize<'t> (x: string) = 
         JsonSerializer.Deserialize<'t>(x, fsOptions)
@@ -123,6 +126,60 @@ module Prim =
             | Some x -> x
             | None -> failwith "Not found"
         let inline findBack (predicate: 't -> bool) (list: arrList<'t>) =
+            match list |> tryFindBack predicate with
+            | Some x -> x
+            | None -> failwith "Not found"
+    module IListExt =
+        let inline map (mapping: 't -> 'u) (list: IList<'t>) =
+            let result = arrList<'u>()
+            let rec go i =
+                if i >= list.Count then result
+                else
+                    list[i] |> mapping |> result.Add
+                    go (i+1)
+            go 0 
+        let inline iter (action: 't -> unit) (list: IList<'t>) =
+            let rec go i =
+                if i >= list.Count then ()
+                else
+                    list[i] |> action
+                    go (i+1)
+            go 0
+        let inline fold (folder: 'state -> 't -> 'state) (state: 'state) (list: IList<'t>) =
+            let rec go i state =
+                if i >= list.Count then state
+                else
+                    go (i+1) (folder state list[i])
+            go 0 state
+        let inline tryFind (predicate: 't -> bool) (list: IList<'t>) =
+            let rec go i =
+                if i >= list.Count then None
+                elif predicate list[i] then Some list[i]
+                else go (i+1)
+            go 0
+        let inline tryFindBack (predicate: 't -> bool) (list: IList<'t>) =
+            let rec go i =
+                if i < 0 then None
+                elif predicate list[i] then Some list[i]
+                else go (i-1)
+            go (list.Count-1)
+        let inline tryFindIndex (predicate: 't -> bool) (list: IList<'t>) =
+            let rec go i =
+                if i >= list.Count then None
+                elif predicate list[i] then Some i
+                else go (i+1)
+            go 0
+        let inline tryFindIndexBack (predicate: 't -> bool) (list: IList<'t>) =
+            let rec go i =
+                if i < 0 then None
+                elif predicate list[i] then Some i
+                else go (i-1)
+            go (list.Count-1)
+        let inline find (predicate: 't -> bool) (list: IList<'t>) =
+            match list |> tryFind predicate with
+            | Some x -> x
+            | None -> failwith "Not found"
+        let inline findBack (predicate: 't -> bool) (list: IList<'t>) =
             match list |> tryFindBack predicate with
             | Some x -> x
             | None -> failwith "Not found"

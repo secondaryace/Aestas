@@ -34,10 +34,10 @@ module Gsv_Acgnai =
     type Gsv_AcgnaiRequest = {access_token: string; [<Serialization.JsonPropertyName("type")>]type': string; brand: string; name: string; method: string; prarm: Gsv_AcgnaiPrarm}
     type Gsv_AcgnaiResponse = {message: string; audio: string}
     let getVoice (profile: Gsv_Acgnai_Profile) (content: string*string) =
-            let url = "https://infer.acgnai.top/infer/gen"
-            use web = new HttpClient()
-            web.BaseAddress <- new Uri(url)
-            let content = $"""{{
+        let url = "https://infer.acgnai.top/infer/gen"
+        use web = new HttpClient()
+        web.BaseAddress <- new Uri(url)
+        let content = $"""{{
         "access_token": "{profile.token}",
         "type": "tts",
         "brand": "gpt-sovits",
@@ -55,30 +55,29 @@ module Gsv_Acgnai =
             "speed": 1.0
     }}
 }}"""
-            Logger.logInfo[0] content
-            let content = new StringContent(content, Encoding.UTF8, "application/json")
-            let response = web.PostAsync("", content).Result
-            if response.IsSuccessStatusCode then
-                let result = response.Content.ReadAsByteArrayAsync().Result |> Encoding.UTF8.GetString
-                let url = (result |> jsonDeserialize<Gsv_AcgnaiResponse>).audio
-                bytesFromUrl url
-            else
-                Logger.logInfo[0] $"Gsv_Acgnai Error: {response.ReasonPhrase}"
-                raise <| new Exception(response.ReasonPhrase)
+        Logger.logInfo[0] content
+        let content = new StringContent(content, Encoding.UTF8, "application/json")
+        let response = web.PostAsync("", content).Result
+        if response.IsSuccessStatusCode then
+            let result = response.Content.ReadAsByteArrayAsync().Result |> Encoding.UTF8.GetString
+            let url = (result |> jsonDeserialize<Gsv_AcgnaiResponse>).audio
+            bytesFromUrl url
+        else
+            Logger.logInfo[0] $"Gsv_Acgnai Error: {response.ReasonPhrase}"
+            raise <| new Exception(response.ReasonPhrase)
     type Gsv_AcgnaiContent(content: string*string) =
         interface IAestasMappingContent with
-            member _.ContentType = "gsvVoice"
             member _.Convert bot domain = 
                 match bot.ExtraData("gsv") with
                 | Some (:? Gsv_Acgnai_Profile as profile) -> 
                     let voice = getVoice profile content
                     AestasAudio(voice, "audio/wav")
                 | _ -> AestasText("Error: No gsv profile found")
-        interface IAutoInit<(ContentParam->IAestasMappingContent)*string*string, unit> with
+        interface IAutoInit<(ContentParam->IAestasMappingContent)*string*(AestasBot -> string), unit> with
             static member Init _ = 
                 (fun (domain, params', content) ->
-                    params'.Head |> Gsv_AcgnaiContent :> IAestasMappingContent), "gsvVoice", 
+                    params'.Head |> Gsv_AcgnaiContent :> IAestasMappingContent), "gsvVoice", (fun _ ->
                 """You may send voice messages like #[gsvVoice@emotion=content].
 emotion can be one of "难过_sad", "生气_angry", "开心_happy", "中立_neutral".
-e.g. #[gsvVoice@开心_happy=你好呀！]"""
+e.g. #[gsvVoice@开心_happy=你好呀！]""")
             

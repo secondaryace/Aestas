@@ -53,6 +53,7 @@ all |> Array.iter (
         )
 printfn "Project references: %A" proj
 printfn "PackageReference: %A" nuget
+let settings = fsi.CommandLineArgs[1..]
 let spaceLine = ""
 let projectStart = """<Project Sdk="Microsoft.NET.Sdk">"""
 let projectEnd = """</Project>"""
@@ -86,7 +87,7 @@ let xml = [
     plugins |> foldIList (fun list x -> compileInclude x::list) []
     commands |> foldIList (fun list x -> compileInclude x::list) []
     bots |> foldIList (fun list x -> compileInclude x::list) []
-    ["cli.fs" |> src |> compileInclude]
+    if settings |> Array.contains "--nocli" then [] else ["cli.fs" |> src |> compileInclude]
     [itemGroupEnd]
     [spaceLine]
     [itemGroupStart]

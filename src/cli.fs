@@ -6,10 +6,8 @@ open Aestas.Llms.Gemini
 open Aestas.Core.Logger
 open Aestas.Prim
 open Aestas.Core.Console
+open Aestas.Plugins.MsBing
 module Cli =
-    // type LogListView<'t when 't :> IDrawableCursor>(source: obj, posX: int, posY: int, width: int, height: int) =
-    //     inherit VerticalListView<'t>(null, posX, posY, width, height)
-    //     do
     [<EntryPoint>]
     let main(args) =
         AutoInit.init()
@@ -27,6 +25,7 @@ module Cli =
         let tab = TabView(arrList [|
             " Bots ", VerticalTabView(
                 AutoInit.bots
+                |> arrList
                 |> ArrList.map (fun b -> 
                     b.Name,
                     let p = PanelView(0, 0, Console.WindowWidth-13, Console.WindowHeight-2)

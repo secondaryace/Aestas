@@ -61,10 +61,9 @@ module rec AestasLagrangeBot =
             | :? MentionEntity as m -> 
                 AestasMention {uid = m.Uin; name = m.Name.Substring(1)}
             | :? ForwardEntity as f ->
-                logInfo[0] $"ForwardEntity: {f.MessageId}"
                 match messages 
                     |> ArrList.tryFindBack (fun m -> (m :?> LagrangeMessage).Sequence = f.Sequence) with
-                | Some m -> AestasText "#[quote not found]"//m.Parse() |> AestasQuote
+                | Some m -> AestasQuote m.MessageId
                 | None -> AestasText "#[quote not found]"
             | _ -> AestasText "not supported"
         member this.ParseAestasContent (content: AestasContent): IMessageEntity =
@@ -114,23 +113,23 @@ module rec AestasLagrangeBot =
                     this.MessageCacheQueue.Add(callback, m.Sequence.Value)
                     return Ok ()
             }
-        override this.Recall msg =
+        override this.Recall messageId =
             async {
                 if private' then return false else
                 match 
-                        (messages :> arrList<IMessageAdapter>) 
-                        |> ArrList.tryFindIndexBack (fun x -> x.MessageId = msg.mid) 
+                    (messages :> arrList<IMessageAdapter>) 
+                    |> ArrList.tryFindIndexBack (fun x -> x.MessageId = messageId) 
+                with
+                | Some i -> 
+                    match! 
+                        bot.RecallGroupMessage (messages[i] :?> LagrangeMessage).Chain 
+                        |> Async.AwaitTask 
                     with
-                    | Some i -> 
-                        match! 
-                            bot.RecallGroupMessage (messages[i] :?> LagrangeMessage).Chain 
-                            |> Async.AwaitTask 
-                        with
-                        | true ->
-                            messages.RemoveAt i
-                            return true
-                        | false -> return false
-                    | None -> return false
+                    | true ->
+                        messages.RemoveAt i
+                        return true
+                    | false -> return false
+                | None -> return false
             }
         override _.Self = self
         override _.Virtual = {name = "Virtual"; uid = UInt32.MaxValue}
@@ -292,11 +291,7 @@ module rec AestasLagrangeBot =
                             if event.Chain.FriendUin = bot.BotUin then
                                 match
                                     chat.MessageCacheQueue |> ArrList.tryFindBack (fun (callback, seq) -> 
-                                        if seq = event.Chain.Sequence then 
-                                            callback (LagrangeMessage(chat.Messages :?> LagrangeMessageCollection, event.Chain, SequenceOk))
-                                            true
-                                        else false
-                                    )
+                                        seq = event.Chain.Sequence)
                                 with
                                 | Some (callback, seq) -> 
                                     chat.MessageCacheQueue.Remove(callback, seq) |> ignore
@@ -316,7 +311,7 @@ module rec AestasLagrangeBot =
                             match chat.Bot with
                             | None -> ()
                             | Some bot ->
-                                bot.SelfTalk chat [AestasText "(poke you)"] |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
+                                [AestasText "(poke you)"] |> Some |> bot.SelfTalk chat |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
                     )
                 ) |> bot.Invoker.add_OnFriendPokeEvent
                 (fun _ (event: EventArg.GroupPokeEvent) -> 
@@ -327,7 +322,7 @@ module rec AestasLagrangeBot =
                             match chat.Bot with
                             | None -> ()
                             | Some bot ->
-                                bot.SelfTalk chat [AestasText "(poke you)"] |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
+                                [AestasText "(poke you)"] |> Some |> bot.SelfTalk chat |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
                     )
                 ) |> bot.Invoker.add_OnGroupPokeEvent
             member _.FetchDomains() = 
@@ -378,12 +373,12 @@ module rec AestasLagrangeBot =
             member _.Run() = async {
                 login()
             }
-        interface IAutoInit<IProtocolAdapter*string, unit> with
+        interface IAutoInit<IProtocolAdapter, unit> with
             static member Init _ = 
                 let lagrange = new LagrangeAdapter() :> IProtocolAdapter
                 lagrange.Init()
                 lagrange.Run() |> Async.RunSynchronously
-                lagrange, "lagrange"
+                lagrange
 
 
 
