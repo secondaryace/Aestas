@@ -6,8 +6,7 @@ Configure everything in F# code, no need to write JSON or YAML.
 **English** | [简体中文](README_zh.md)
 ## Build
 ```bash
-dotnet fsi fsproj.fsx
-dotnet build
+aestas build
 ```
 ## Modules
 | Type | File | .NET Type |

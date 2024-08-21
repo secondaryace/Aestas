@@ -4,8 +4,7 @@
 一切使用F#代码配置，无需编写JSON或YAML。
 ## **构建**
 ```bash
-dotnet fsi fsproj.fsx
-dotnet build
+aestas build
 ```
 ## **模块**
 | 类型 | 文件 | .NET 类型 |
