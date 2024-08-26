@@ -11,42 +11,42 @@ open Aestas
 open Aestas.Prim
 open Aestas.Core
 open Aestas.Core.Logger
-type GText = {text: string}
-type _GInlineData = {mime_type: string; data: string}
-type GInlineData = {inline_data: _GInlineData}
-type GPart = 
-    | Text of GText 
-    | InlineData of GInlineData
-type GContent = {role: string; parts: GPart[]}
-type GSafetySetting = {category: string; threshold: string}
-type GSafetyRatting = {category: string; probability: string}
-type GProfile = {
-    api_key: string option
-    gcloudpath: string option
-    safetySettings: GSafetySetting[]
-    generation_configs: IDictionary<string, GenerationConfig> option
-    }
-type GGenerationConfig = {
-    maxOutputTokens: int
-    temperature: float
-    topP: float
-    topK: float
-    }
-type GRequest = {
-    contents: GContent[]
-    safetySettings: GSafetySetting[]
-    systemInstruction: GContent
-    generationConfig: GGenerationConfig option
-    }
-type GCandidate = {
-    content: GContent
-    finishReason: string
-    index: int
-    safetyRatings: GSafetyRatting[]
-    }
-type GResponse = {candidates: GCandidate[]}
+open System.Diagnostics
 module Gemini =
-    open System.Diagnostics
+    type GText = {text: string}
+    type _GInlineData = {mime_type: string; data: string}
+    type GInlineData = {inline_data: _GInlineData}
+    type GPart = 
+        | Text of GText 
+        | InlineData of GInlineData
+    type GContent = {role: string; parts: GPart[]}
+    type GSafetySetting = {category: string; threshold: string}
+    type GSafetyRatting = {category: string; probability: string}
+    type GProfile = {
+        api_key: string option
+        gcloudpath: string option
+        safetySettings: GSafetySetting[]
+        generation_configs: IDictionary<string, GenerationConfig> option
+        }
+    type GGenerationConfig = {
+        maxOutputTokens: int
+        temperature: float
+        topP: float
+        topK: float
+        }
+    type GRequest = {
+        contents: GContent[]
+        safetySettings: GSafetySetting[]
+        systemInstruction: GContent
+        generationConfig: GGenerationConfig option
+        }
+    type GCandidate = {
+        content: GContent
+        finishReason: string
+        index: int
+        safetyRatings: GSafetyRatting[]
+        }
+    type GResponse = {candidates: GCandidate[]}
     let postRequest (auth: GProfile) (url: string) (content: string) =
         async{
             let useOauth = match auth.api_key with | Some _ -> false | None -> true
@@ -95,10 +95,10 @@ module Gemini =
             {role = "user"; parts = parts}
         interface ILanguageModelClient with
             member this.CacheMessage bot domain message =
-                if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList<struct(GContent*uint64)>())
+                if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList())
                 contentsCache[domain].Add struct(message.content |> parseContents domain, message.mid)
             member this.CacheContents bot domain content =
-                if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList<struct(GContent*uint64)>())
+                if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList())
                 contentsCache[domain].Add struct(content |> parseContents domain, 0UL)
             member this.GetReply bot domain =
                 async {

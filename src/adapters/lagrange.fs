@@ -66,6 +66,10 @@ module rec AestasLagrangeBot =
                 | Some m -> AestasQuote m.MessageId
                 | None -> AestasText "#[quote not found]"
             | _ -> AestasText "not supported"
+        member this.ParseLagrangeMessage (entities: IMessageEntity list) =
+            match entities with
+            | (:? MarketfaceEntity)::(:? TextEntity as t)::_ -> [AestasText $"#[sticker:{t.Text.Trim('[', ']')}]"]
+            | _ -> entities |> List.map this.ParseLagrangeEntity
         member this.ParseAestasContent (content: AestasContent): IMessageEntity =
             match content with
             | AestasText t -> new TextEntity(t)
@@ -82,6 +86,7 @@ module rec AestasLagrangeBot =
             async {
                 let msgs = msgs |> List.map this.ParseAestasContent
                 let chain = (if private' then MessageBuilder.Friend(gid) else MessageBuilder.Group(gid)).Build()
+                // todo
                 chain.AddRange msgs
                 // return value is not useful in private chat
                 let! m = bot.SendMessage chain |> Async.AwaitTask
@@ -162,7 +167,7 @@ module rec AestasLagrangeBot =
             member _.SenderId = cachedSender.uid
             member this.Parse() = {
                 sender = cachedSender
-                content = messageChain |> List.ofSeq |> List.map collection.Domain.ParseLagrangeEntity
+                content = messageChain |> List.ofSeq |> collection.Domain.ParseLagrangeMessage
                 mid = messageChain.MessageId
                 }
             member this.Mention uid = 

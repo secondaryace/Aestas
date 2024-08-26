@@ -252,3 +252,15 @@ module Prim =
         p.WaitForExit() |> ignore
         p.Kill()
         result
+    let pwsh (cmd: string) =
+        let psi = Diagnostics.ProcessStartInfo("pwsh", $"-c \"{cmd}\"")
+        psi.RedirectStandardOutput <- true
+        psi.UseShellExecute <- false
+        psi.CreateNoWindow <- true
+        use p = new Diagnostics.Process()
+        p.StartInfo <- psi
+        p.Start() |> ignore
+        let result = p.StandardOutput.ReadToEnd()
+        p.WaitForExit() |> ignore
+        p.Kill()
+        result

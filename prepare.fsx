@@ -2,7 +2,16 @@ open System
 open System.IO
 open System.Collections.Generic
 let getFiles path = 
-    if Directory.Exists path then Directory.GetFiles path |> Array.filter (fun s -> s.EndsWith ".fs") else [||]
+    if Directory.Exists path then
+        let files = Directory.GetFiles path 
+        let source = files |> Array.filter (fun s -> s.EndsWith ".fs")
+        let ignore' = 
+            files 
+            |> Array.filter (fun s -> s.EndsWith ".fs.ignore") 
+            |> Array.map (fun s -> s.Substring(0, s.Length - 7), ())
+            |> Map.ofArray
+        source |> Array.filter (fun s -> ignore' |> Map.containsKey s |> not)
+    else [||]
 let ( @@ ) (a: 't[]) (b: 't[]) = Array.concat [a; b]
 let checkDir dir = if Directory.Exists dir then () else Directory.CreateDirectory dir |> ignore
 checkDir "src"
@@ -39,7 +48,7 @@ let parseRef (r: string) =
 let findRef (reader: StreamReader) = 
     let rec go() =
         let line = reader.ReadLine()
-        if line.StartsWith "//!" then
+        if line |> String.IsNullOrEmpty |> not && line.StartsWith "//!" then
             printfn "Finded ref: %s" line
             parseRef line
             go()

@@ -12,47 +12,55 @@ open Aestas.Prim
 
 module Gsv_Acgnai =
     type Gsv_Acgnai_Profile = {token: string; speaker: string}
-    // {
-    //     "access_token": "你的访问令牌",
-    //     "type": "tts",
-    //     "brand": "gpt-sovits",
-    //     "name": "anime",
-    //     "method": "api",
-    //     "prarm": {
-    //         "speaker": "芙宁娜",
-    //         "emotion": "中立",
-    //         "text": "测试语音合成。",
-    //         "text_language":"中文",
-    //         "audio_url": "https://gsv.ai-lab.top",
-    //         "top_k": 10,
-    //         "top_p": 1.0,
-    //         "temperature": 1.0,
-    //         "speed": 1.0
-    //     }
-    // }
-    type Gsv_AcgnaiPrarm = {speaker: string; emotion: string; text: string; text_language: string; audio_url: string; top_k: int; top_p: float; temperature: float; speed: float}
-    type Gsv_AcgnaiRequest = {access_token: string; [<Serialization.JsonPropertyName("type")>]type': string; brand: string; name: string; method: string; prarm: Gsv_AcgnaiPrarm}
     type Gsv_AcgnaiResponse = {message: string; audio: string}
+// {
+//     "access_token": "你的访问令牌",
+//     "type": "tts",
+//     "brand": "gpt-sovits",
+//     "name": "anime",
+//     "method": "api",
+//     "prarm": {
+//         "speaker": "芙宁娜",
+//         "emotion": "中立",
+//         "text": "测试语音合成。",
+//         "text_language":"中文",
+//         "text_split_method": "按标点符号切",
+//         "fragment_interval": 0.3,
+//         "batch_size": 1,
+//         "batch_threshold": 0.75,
+//         "parallel_infer": true,
+//         "split_bucket": true,
+//         "top_k": 10,
+//         "top_p": 1.0,
+//         "temperature": 1.0,
+//         "speed_factor": 1.0
+//     }
+// }
     let getVoice (profile: Gsv_Acgnai_Profile) (content: string*string) =
         let url = "https://infer.acgnai.top/infer/gen"
         use web = new HttpClient()
         web.BaseAddress <- new Uri(url)
         let content = $"""{{
-        "access_token": "{profile.token}",
-        "type": "tts",
-        "brand": "gpt-sovits",
-        "name": "anime",
-        "method": "api",
-        "prarm": {{
-            "speaker": "{profile.speaker}",
-            "emotion": "{fst content}",
-            "text": "{snd content}",
-            "text_language":"自动检测",
-            "audio_url": "https://gsv.ai-lab.top",
-            "top_k": 10,
-            "top_p": 1.0,
-            "temperature": 1.0,
-            "speed": 1.0
+    "access_token": "{profile.token}",
+    "type": "tts",
+    "brand": "gpt-sovits",
+    "name": "anime",
+    "method": "api",
+    "prarm": {{
+        "speaker": "{profile.speaker}",
+        "emotion": "{fst content}",
+        "text": "{snd content}",
+        "text_language":"多语种混合",
+        "text_split_method": "按标点符号切",
+        "fragment_interval": 0.3,
+        "batch_size": 1,
+        "batch_threshold": 0.75,
+        "parallel_infer": true,
+        "split_bucket": true,
+        "top_k": 10,
+        "top_p": 1.0,
+        "temperature": 1.0,
+        "speed_factor": 1.0
     }}
 }}"""
         Logger.logInfo[0] content

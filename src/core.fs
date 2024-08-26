@@ -32,11 +32,11 @@ module rec Core =
             with
                 member this.Print() = $"[{this.time:``yyyy-MM-dd HH:mm:ss``}] [{this.level.ToString().ToUpper()}] {this.message}"
                     
-        let private logs = Dictionary<obj, LogEntry arrList>()
+        let internal logs = Dictionary<obj, LogEntry arrList>()
         let onLogUpdate = arrList<LogEntry -> unit>()
         let getLoggerOwners() = logs.Keys |> Seq.toArray
         let getLogs o = logs[o] :> IReadOnlyList<LogEntry>
-        let inline private log' (key: obj) (lv: LogLevel) (s: string) =
+        let inline internal _log (key: obj) (lv: LogLevel) (s: string) =
             if logs.ContainsKey key |> not then logs.Add(key, arrList())
             let log = {time = DateTime.Now; level = lv; message = s}
             logs[key].Add log
@@ -48,14 +48,14 @@ module rec Core =
                     logs[key].Clear()
                 )
             onLogUpdate |> ArrList.iter (fun f -> f log)
-        let inline private log'' (lv: LogLevel) (key: obj) (s: string) = log' key lv s
-        let log = IndexerBox<obj, LogLevel -> string -> unit> log'
-        let logTrace = IndexerBox<obj, string -> unit> (log'' LogLevel.Trace)
-        let logDebug = IndexerBox<obj, string -> unit> (log'' LogLevel.Debug)
-        let logInfo = IndexerBox<obj, string -> unit> (log'' LogLevel.Info)
-        let logWarn = IndexerBox<obj, string -> unit> (log'' LogLevel.Warn)
-        let logError = IndexerBox<obj, string -> unit> (log'' LogLevel.Error)
-        let logFatal =  IndexerBox<obj, string -> unit> (log'' LogLevel.Fatal)
+        let inline internal __log (lv: LogLevel) (key: obj) (s: string) = _log key lv s
+        let log = IndexerBox<obj, LogLevel -> string -> unit> _log
+        let logTrace = IndexerBox<obj, string -> unit> (__log LogLevel.Trace)
+        let logDebug = IndexerBox<obj, string -> unit> (__log LogLevel.Debug)
+        let logInfo = IndexerBox<obj, string -> unit> (__log LogLevel.Info)
+        let logWarn = IndexerBox<obj, string -> unit> (__log LogLevel.Warn)
+        let logError = IndexerBox<obj, string -> unit> (__log LogLevel.Error)
+        let logFatal =  IndexerBox<obj, string -> unit> (__log LogLevel.Fatal)
     // type private _print = string -> unit
     // type private _chatHook = ILanguageModelClient -> unit
     // [<CustomEquality>]
@@ -118,11 +118,7 @@ module rec Core =
                         this.Messages.Add msg
                         return Ok ()
                     | Ok reply, callback -> 
-                        return! reply |> this.Send (fun rmsg ->
-                            this.Messages.Add msg
-                            this.Messages.Add rmsg
-                            rmsg.Parse() |> callback
-                        )
+                        return! reply |> this.Send callback
                         // match! reply |> this.Send with
                         // | Error e -> return Error e
                         // | Ok rmsg ->
@@ -134,9 +130,13 @@ module rec Core =
             }
     type AestasChatDomains = Dictionary<uint32, AestasChatDomain>
     type BotContentLoadStrategy =
+        /// Load anything as plain text
         | StrategyLoadNone
+        /// Only load media from messages that mentioned the bot or private messages
         | StrategyLoadOnlyMentionedOrPrivate
+        /// Load all media from messages
         | StrategyLoadAll
+        /// Load media from messages that satisfy the predicate
         | StrategyLoadByPredicate of (IMessageAdapter -> bool)
     type BotMessageReplyStrategy = 
         /// Won't reply to any message
@@ -148,7 +148,11 @@ module rec Core =
         /// Reply to messages whose domain ID is in the whitelist
         | StrategyReplyByPredicate of (AestasMessage -> bool)
     type BotMessageCacheStrategy =
+        /// Clear cache after reply immediately
+        | StrategyCacheNone
+        /// Only cache messages that mentioned the bot or private messages
         | StrategyCacheOnlyMentionedOrPrivate
+        /// Cache all messages
         | StrategyCacheAll
     type BotContentParseStrategy =
         /// Parse all content to plain text
@@ -203,6 +207,7 @@ module rec Core =
     type SystemInstructionBuilder = AestasBot -> string -> string
     type PrefixBuilder = AestasBot -> AestasMessage -> AestasMessage
     /// Bot class used in Aestas Core
+    /// Create this directly
     type AestasBot() =
         let groups = AestasChatDomains()
         let extraData = Dictionary<string, obj>()
@@ -218,6 +223,7 @@ module rec Core =
         member this.Domains = groups :> IReadOnlyDictionary<uint32, AestasChatDomain> 
         member val ContentLoadStrategy = StrategyLoadAll with get, set
         member val ReplyStrategy = StrategyReplyNone with get, set
+        member val CacheStrategy = StrategyCacheAll with get, set
         member val ContentParseStrategy = StrategyParseAndAlertError with get, set
         member val Commands: Dictionary<string, ICommand> = Dictionary() with get
         member val CommandPrivilegeMap: Dictionary<uint32, CommandPrivilege> = Dictionary() with get
@@ -261,6 +267,11 @@ module rec Core =
                     return Ok [], ignore
                 | None -> return Error "No model binded to this bot", ignore
                 | Some model ->
+                    // check if illegal strategy
+                    match this.ReplyStrategy, this.CacheStrategy with
+                    | StrategyReplyAll, StrategyCacheNone ->
+                        failwith "Check your strategy, you can't reply to message without any cache"
+                    | _ -> ()
                     let message' = 
                         match this.ContentLoadStrategy with
                         | StrategyLoadNone -> message.ParseAsPlainText()
@@ -272,14 +283,35 @@ module rec Core =
                         match this.PrefixBuilder with
                         | Some b -> b this message'
                         | None -> message'
-                    model.CacheMessage this domain message'
+                    let callback' =
+                        let callback' (callback: AestasMessage -> unit) rmsg = 
+                            domain.Messages.Add rmsg
+                            rmsg.Parse() |> callback
+                        match this.CacheStrategy with
+                        | StrategyCacheNone -> 
+                            model.CacheMessage this domain message'
+                            domain.Messages.Add message
+                            fun c r -> callback' c r; model.ClearCache()
+                        | StrategyCacheAll -> 
+                            model.CacheMessage this domain message'
+                            domain.Messages.Add message
+                            callback'
+                        | StrategyCacheOnlyMentionedOrPrivate when message.Mention domain.Self.uid || domain.Private ->
+                            model.CacheMessage this domain message'
+                            domain.Messages.Add message
+                            callback'
+                        | _ ->
+                            callback'
                     match this.ReplyStrategy with
                     | StrategyReplyOnlyMentionedOrPrivate when message.Mention domain.Self.uid || domain.Private -> 
-                        return! model.GetReply this domain
+                        let! result, callback = model.GetReply this domain
+                        return result, callback' callback
                     | StrategyReplyAll ->
-                        return! model.GetReply this domain
+                        let! result, callback = model.GetReply this domain
+                        return result, callback' callback
                     | StrategyReplyByPredicate p when p message' ->
-                        return! model.GetReply this domain
+                        let! result, callback = model.GetReply this domain
+                        return result, callback' callback
                     | _ -> 
                         return Ok [], ignore
             }
@@ -309,7 +341,7 @@ module rec Core =
                     if domain.Messages[messageInd].SenderId <> domain.Self.uid then return Error "Not my message" else
                     match! domain.Recall messageId with
                     | true ->
-                        Logger.logWarn[0] $"{this.Name} Could not recall message {messageId} in domain {domain.Name}"
+                        Logger.logWarn[0] $"{this.Name} could not recall message {messageId} in domain {domain.Name}"
                     | false -> ()
                     match this.Model with
                     | _ when groups.ContainsValue domain |> not -> return Error "This domain hasn't been added to this bot"
@@ -379,14 +411,18 @@ module rec Core =
     [<StructuredFormatDisplay("{Display}")>]
     type Atom =
         | AtomTuple of Atom list
-        | Number of float32
+        | AtomObject of (string*Atom) list
+        | Number of float
         | String of string
         | Identifier of string
         | Unit
         with
             member this.Display = 
                 match this with
-                | AtomTuple l -> $"""({String.Join(", ", l |> List.map (fun x -> x.Display))})"""
+                | AtomTuple l -> $"""({l |> List.map (fun x -> x.Display) |> String.concat ", "})"""
+                | AtomObject l -> $"""{{
+{l |> List.map (fun (k, v) -> $"  {k} = {v.Display}") |> String.concat "\n"}
+}}"""
                 | Number n -> n.ToString()
                 | String s -> $"\"{s}\""
                 | Identifier i -> i
@@ -768,7 +804,7 @@ module rec Core =
             type Token =
                 | TokenSpace
                 | TokenPrint
-                | TokenFloat of single
+                | TokenFloat of float
                 | TokenString of string
                 /// a, bar, 变量 etc.
                 | TokenIdentifier of string
@@ -871,7 +907,7 @@ module rec Core =
                     | c when isNumber c ->
                         let (cursor, isFloat) = scanNumber lp cursor source cache false
                         let s = cache.ToString()
-                        tokens.Add(TokenFloat (Single.Parse s))
+                        tokens.Add(TokenFloat (Double.Parse s))
                         innerRec tokens cursor
                     | '$' ->
                         let cursor = scanIdentifier lp (cursor+1) source cache
@@ -1009,7 +1045,7 @@ module rec Core =
                     let token, tokens, errors = parseTupleItem r errors
                     match token with
                     | Call args ->
-                        Call (args.Head::l::args.Tail), tokens, errors
+                        Call (args@[l]), tokens, errors
                     | _ -> failwith "Impossible"
                 | _ -> l, tokens, errors
             let rec parseExpr (tokens: Token list) (errors: string list) =
@@ -1102,7 +1138,7 @@ module rec Core =
                 | Identifier "if" ->
                     match excecuteAst env args.Tail.Head, args.Tail.Tail with
                     | Number flag, t::f::[] ->
-                        if flag = 0f then
+                        if flag = 0. then
                             excecuteAst env f
                         else
                             excecuteAst env t
@@ -1125,7 +1161,7 @@ module rec Core =
         let excecute (env: CommandEnvironment) (cmd: string) =
             let tokens = Lexer.scanWithoutMacro LanguagePack cmd
             let ast, _, errors = Parser.parse tokens []
-            Logger.logInfo[0] <| sprintf "%A,%A,%A" tokens ast errors
+            Logger.logInfo[0] <| sprintf "%A, %A, %A" tokens ast errors
             match errors with
             | [] -> 
                 match excecuteAst env ast with
@@ -1147,7 +1183,7 @@ module rec Core =
         let overridePrimCtor = dict' [
             "text", fun (domain: AestasChatDomain, param: (string*string) list, content) -> AestasText content
             "image", fun (domain, param, content) -> AestasImage (Array.zeroCreate<byte> 0, "image/png", 0, 0)
-            "audio", fun (domain, param, content) -> AestasAudio (Array.zeroCreate<byte> 0, "audio/mpeg")
+            "audio", fun (domain, param, content) -> AestasAudio (Array.zeroCreate<byte> 0, "audio/wav")
             "video", fun (domain, param, content) -> AestasVideo (Array.zeroCreate<byte> 0, "video/mp4")
             "mention", fun (domain, param, content) ->
                 let content = content.Trim()
@@ -1206,6 +1242,7 @@ module rec Core =
                     //#[name@pram=m@pram'=n:content]
                     let i, funcName, param, content, _ = scanBracket (i+2) 1 "" []
                     sprintf "funcName: %s, param: %A, content: %s" funcName param content |> Logger.logInfo[0]
+                    try
                     if overridePrimCtor.ContainsKey funcName then
                         let content = overridePrimCtor[funcName] (domain, param, content)
                         result.Add content
@@ -1223,6 +1260,13 @@ module rec Core =
                             content |> AestasText |> result.Add
                         | _ -> ()
                         // log here
+                    with ex ->
+                        match bot.ContentParseStrategy with
+                        | StrategyParseAndAlertError ->
+                            $"<error occured when parsing [{funcName}]: {ex.Message}>" |> AestasText |> result.Add
+                        | StrategyParseAndDestructErrorFormat ->
+                            content |> AestasText |> result.Add
+                        | _ -> ()
                     go i
                 | _ -> 
                     cache.Append botOut[i] |> ignore
@@ -1264,6 +1308,53 @@ module rec Core =
                 member _.Privilege = CommandPrivilege.Normal
                 member _.Execute env args =
                     args |> AtomTuple
+        type EqualCommand() = //not yet implemented
+            interface ICommand with
+                member _.Name = "eq"
+                member _.Help = "Operator: eq x y -> 1 if x = y, 0 otherwise"
+                member _.AccessibleDomain = CommandAccessibleDomain.All
+                member _.Privilege = CommandPrivilege.Normal
+                member _.Execute env args =
+                    match args with
+                    | x::y::[] -> 
+                        match x, y with
+                        | Number x, Number y -> if x = y then Number 1. else Number 0.
+                        | String x, String y -> if x = y then Number 1. else Number 0.
+                        | Identifier x, Identifier y -> if x = y then Number 1. else Number 0.
+                        | _, _ -> env.log "Expected same type"; Number 0.
+                    | _ -> env.log "Expected two arguments"; Number 0.
+        type ProjectionCommand() =
+            interface ICommand with
+                member _.Name = "proj"
+                member _.Help = "Operator: proj \"a\" ({a: x; b: y, ...}, {a: z; b: w, ...}, ...) -> (x, z, ...)"
+                member _.AccessibleDomain = CommandAccessibleDomain.All
+                member _.Privilege = CommandPrivilege.Normal
+                member _.Execute env args =
+                    match args with
+                    | Identifier x::AtomTuple ls::[] -> 
+                        let rec go acc = function
+                        | [] -> acc |> List.rev
+                        | AtomObject o::t -> 
+                            match o |> List.tryFind (fst >> ( = ) x) with
+                            | Some (_, v) -> go (AtomObject([x, v])::acc) t
+                            | None -> env.log $"Key {x} not found"; go (Unit::acc) t
+                        | _ -> env.log "Expected object"; go (Unit::acc) []
+                        go [] ls |> AtomTuple
+                    | AtomTuple xs::AtomTuple ls::[] ->
+                        let rec go acc = function
+                        | [] -> acc |> List.rev
+                        | AtomObject o::t -> 
+                            ((xs 
+                            |> List.map (function
+                                | Identifier x -> 
+                                    match o |> List.tryFind (fst >> ( = ) x) with
+                                    | Some (_, v) -> x, v
+                                    | None -> env.log $"Key {x} not found"; "_", Unit
+                                | _ -> env.log "Expected identifier"; "_", Unit)
+                            |> AtomObject)::acc |> go) t
+                        | _ -> env.log "Expected object"; go (Unit::acc) []
+                        go [] ls |> AtomTuple
+                    | _ -> env.log "Expected identifier and object tuple"; Unit
         type DummyIfCommand() =
             interface ICommand with
                 member _.Name = "if"
@@ -1287,10 +1378,11 @@ module rec Core =
                 member _.AccessibleDomain = CommandAccessibleDomain.All
                 member _.Privilege = CommandPrivilege.Normal
                 member _.Execute env args =
-                    env.log $"""## Domain:
-* ID={env.domain.DomainId}
-* Name={env.domain.Name}
-* Private={env.domain.Private}"""; Unit
+                    AtomObject [
+                        "id", env.domain.DomainId |> float |> Number
+                        "name", env.domain.Name |> String
+                        "private", if env.domain.Private then Number 1. else Number 0.
+                        ]
         type ListDomainCommand() =
             interface ICommand with
                 member _.Name = "lsdomain"
@@ -1299,10 +1391,15 @@ module rec Core =
                 member _.Privilege = CommandPrivilege.Normal
                 member _.Execute env args =
                     let sb = StringBuilder()
-                    sb.Append "## Domain List" |> ignore
                     env.bot.Domains |>
-                    Dict.iter (fun _ v -> sb.Append $"\n* {v.DomainId}: {v.Name}" |> ignore)
-                    sb.ToString() |> env.log; Unit
+                    Seq.map (fun p ->
+                        AtomObject [
+                            "id", p.Value.DomainId |> float |> Number
+                            "name", p.Value.Name |> String
+                            "private", if p.Value.Private then Number 1. else Number 0.
+                            ])
+                    |> List.ofSeq
+                    |> AtomTuple
         type HelpCommand() =
             interface ICommand with
                 member _.Name = "help"
@@ -1347,9 +1444,16 @@ module rec Core =
                 member _.Execute env args =
                     env.bot.ClearCachedContext env.domain
                     env.log "Cached context cleared"; Unit
+        let operators: Dictionary<string, ICommand> = dict' [
+            "id", IdentityCommand()
+            "tuple", MakeTupleCommand()
+            "proj", ProjectionCommand()
+            "if", DummyIfCommand()
+        ]
         let commands: Dictionary<string, ICommand> = dict' [
             "id", IdentityCommand()
             "tuple", MakeTupleCommand()
+            "proj", ProjectionCommand()
             "if", DummyIfCommand()
             "version", VersionCommand()
             "domaininfo", DomainInfoCommand()

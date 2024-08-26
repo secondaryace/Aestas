@@ -1,5 +1,6 @@
 namespace Aestas.Commands
 open System
+open System.Net.Http
 open Aestas.Prim
 open Aestas.Core
 open Aestas.AutoInit
@@ -19,7 +20,7 @@ type InfoCommand() =
                 else
                     (cmd "wmic cpu get name | find /V \"Name\"").Trim()
             let ipinfo =
-                use web = new Net.Http.HttpClient()
+                use web = new HttpClient()
                 web.GetStringAsync("http://ip-api.com/line/").Result.Split('\n')
             let heap = (GC.GetTotalMemory true |> float) / 1024.0 / 1024.0
             let pwd = Environment.CurrentDirectory
