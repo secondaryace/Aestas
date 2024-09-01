@@ -10,7 +10,7 @@ let getFiles path =
             |> Array.filter (fun s -> s.EndsWith ".fs.ignore") 
             |> Array.map (fun s -> s.Substring(0, s.Length - 7), ())
             |> Map.ofArray
-        source |> Array.filter (fun s -> ignore' |> Map.containsKey s |> not)
+        source |> Array.filter (fun s -> ignore' |> Map.containsKey s |> not) |> Array.sortDescending
     else [||]
 let ( @@ ) (a: 't[]) (b: 't[]) = Array.concat [a; b]
 let checkDir dir = if Directory.Exists dir then () else Directory.CreateDirectory dir |> ignore

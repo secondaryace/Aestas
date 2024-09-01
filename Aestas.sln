@@ -7,6 +7,8 @@ Project("{6EC3EE1D-3C4E-46DD-8F32-0CC8E7565705}") = "aestas", "aestas.fsproj", "
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "Lagrange.Core", "ref\Lagrange.Core\Lagrange.Core\Lagrange.Core.csproj", "{4A6122C7-2032-4361-ABDC-CBBC381C044A}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "Aestas.CSharp", "src\csharp\Aestas.CSharp\Aestas.CSharp.csproj", "{9F844823-16BD-4C74-9D1A-901C31AA0543}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -21,6 +23,10 @@ Global
 		{4A6122C7-2032-4361-ABDC-CBBC381C044A}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{4A6122C7-2032-4361-ABDC-CBBC381C044A}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{4A6122C7-2032-4361-ABDC-CBBC381C044A}.Release|Any CPU.Build.0 = Release|Any CPU
+		{9F844823-16BD-4C74-9D1A-901C31AA0543}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{9F844823-16BD-4C74-9D1A-901C31AA0543}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{9F844823-16BD-4C74-9D1A-901C31AA0543}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{9F844823-16BD-4C74-9D1A-901C31AA0543}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

@@ -32,14 +32,14 @@ module Cli =
                     TextView($"""Model: {match b.Model with | Some model -> model.GetType().Name | None -> "None"}""", Some ConsoleColor.Gray, 0, 0)
                     |> p.Append
                     DynamicObjectView(
-                        (fun () -> $"ReplyStrategy:          {b.ReplyStrategy}"), 
+                        (fun () -> $"ReplyStrategy:          {b.MessageReplyStrategy}"), 
                         (fun s st -> setColor ConsoleColor.Gray; let ret = stringDrawCursor s st in resetColor(); ret),
                          0, 1, Console.WindowWidth-13, 1) |> p.Append
-                    let mutable repStra = b.ReplyStrategy
+                    let mutable repStra = b.MessageReplyStrategy
                     ButtonView((
                         fun active ->
-                            if active then b.ReplyStrategy <- repStra; false
-                            else b.ReplyStrategy <- StrategyReplyNone; true
+                            if active then b.MessageReplyStrategy <- repStra; false
+                            else b.MessageReplyStrategy <- StrategyReplyNone; true
                         ),
                         "([M]ute)", Some ConsoleColor.DarkGray, Some ConsoleColor.Cyan, ConsoleKey.M, 15, 1) |> p.Append
                     TextView("Domains:", Some ConsoleColor.Gray, 0, 2) |> p.Append

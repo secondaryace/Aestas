@@ -29,37 +29,30 @@ module AutoInit =
     let commands = _commands :> IReadOnlyDictionary<Type, ICommand>
     let inline invokeInit<'t, 'tArg> (t: Type) (arg: 'tArg) =
         t.GetInterfaceMap(typeof<IAutoInit<'t, 'tArg>>).TargetMethods[0].Invoke(null, [|arg|]) :?> 't
-    let inline tryGetCommand<'t when 't :> ICommand> () =
-        if commands.ContainsKey typeof<'t> then Some commands[typeof<'t>] else None
-    let inline tryGetProtocol<'t when 't :> IProtocolAdapter> () =
-        if protocols.ContainsKey typeof<'t> then Some protocols[typeof<'t>] else None
-    let inline tryGetMappingContentCtorTip<'t when 't :> IAestasMappingContent> () =
-        if mappingContentCtorTips.ContainsKey typeof<'t> then Some mappingContentCtorTips[typeof<'t>] else None
-    let inline tryGetProtocolContentCtorTip<'t when 't :> IProtocolSpecifyContent> () =
-        if protocolContentCtorTips.ContainsKey typeof<'t> then Some protocolContentCtorTips[typeof<'t>] else None
+    let inline tryGetCommand s =
+        match commands |> Dict.tryFind (fun k v -> k.Name = s) with
+        | Some v -> Some v
+        | None -> None
+    let inline tryGetProtocol s =
+        match protocols |> Dict.tryFind (fun k v -> k.GetType().Name = s) with
+        | Some v -> Some v
+        | None -> None
+    let inline tryGetMappingContentCtorTip s =
+        match mappingContentCtorTips |> Dict.tryFind (fun k v -> k.Name = s) with
+        | Some v -> Some v
+        | None -> None
+    let inline tryGetProtocolContentCtorTip s =
+        match protocolContentCtorTips |> Dict.tryFind (fun k v -> k.Name = s) with
+        | Some v -> Some v
+        | None -> None
     let inline getCommand<'t when 't :> ICommand> () = 
-        match tryGetCommand<'t>() with | Some x -> x | None -> failwith $"Command {toString typeof<'t>} not found"
+        if commands.ContainsKey typeof<'t> then commands[typeof<'t>] else failwith $"Command {toString typeof<'t>} not found"
     let inline getProtocol<'t when 't :> IProtocolAdapter> () =
-        match tryGetProtocol<'t>() with | Some x -> x | None -> failwith $"Protocol {toString typeof<'t>} not found"
+        if protocols.ContainsKey typeof<'t> then protocols[typeof<'t>] else failwith $"Protocol {toString typeof<'t>} not found"
     let inline getMappingContentCtorTip<'t when 't :> IAestasMappingContent> () =
-        match tryGetMappingContentCtorTip<'t>() with | Some x -> x | None -> failwith $"MappingContentCtor {toString typeof<'t>} not found"
+        if mappingContentCtorTips.ContainsKey typeof<'t> then mappingContentCtorTips[typeof<'t>] else failwith $"MappingContentCtor {toString typeof<'t>} not found"
     let inline getProtocolContentCtorTip<'t when 't :> IProtocolSpecifyContent> () =
-        match tryGetProtocolContentCtorTip<'t>() with | Some x -> x | None -> failwith $"ProtocolContentCtor {toString typeof<'t>} not found"
-    module BotHelper =
-        let inline getPrimaryCommands() =
-            Builtin.commands.Values |> List.ofSeq
-        let inline addCommand (bot: AestasBot) (cmd: ICommand) =
-            bot.Commands.Add(cmd.Name, cmd)
-        let inline addMappingContentCtorTip (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot->string) =
-            bot.MappingContentCtorTips.Add(name, (ctor, tip))
-        let inline addProtocolContentCtorTip (bot: AestasBot) (ctor: ProtocolSpecifyContentCtor, name: string, tip: AestasBot->string) =
-            bot.ProtocolContentCtorTips.Add(name, (ctor, tip))
-        let inline addCommandRange (bot: AestasBot) (cmds: ICommand list) =
-            cmds |> List.iter (addCommand bot)
-        let inline addMappingContentCtorTipRange (bot: AestasBot) ctorTips =
-            ctorTips |> List.iter (addMappingContentCtorTip bot)
-        let inline addProtocolContentCtorTipRange (bot: AestasBot) ctorTips =
-            ctorTips |> List.iter (addProtocolContentCtorTip bot)
+        if protocolContentCtorTips.ContainsKey typeof<'t> then protocolContentCtorTips[typeof<'t>] else failwith $"ProtocolContentCtor {toString typeof<'t>} not found"
     let init () =
         logInfo["AutoInit"] "Initializing"
         if Directory.Exists "extensions" then

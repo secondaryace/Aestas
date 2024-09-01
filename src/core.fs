@@ -163,10 +163,21 @@ module rec Core =
         | StrategyParseAndAlertError
         /// Parse all content to AestasContent, parse errors format to plain text, like [func: content] -> content
         | StrategyParseAndDestructErrorFormat
-    type BotContextTrimStrategy =
-        | StrategyTrimWhenExceedLength of int
-        | StrategyTrimSummarize of int
-        | StrategyTrimNever
+    type BotContextStrategy =
+        /// Trim context when exceed length
+        | StrategyContextTrimWhenExceedLength of int
+        /// Compress context when exceed length
+        | StrategyContextCompressWhenExceedLength of int
+        /// Reserve all context
+        | StrategyContextReserveAll
+    /// interest is a function, ∈ [0, 100]
+    type BotInterestCurve =
+        /// Bot will always interest in this domain
+        | CurveInterestAlways
+        /// Bot will lose interest in this domain after certain time
+        | CurveInterestTruncateAfterTime of int<sec>
+        /// Use your own function to determine interest
+        | CurveInterestFunction of (int<sec> -> int)
     /// Used in Aestas.Core <-> Model
     /// Implement this interface to box any object to a AestasContent.
     /// For example, model returns [mstts@emotion=Cheerful: Hello], use this to store and convert is to AestasAudio
@@ -181,6 +192,7 @@ module rec Core =
         abstract member ToPlainText: unit -> string
         /// Convert this to something that only protocol can understand
         abstract member Convert: AestasBot -> AestasChatDomain -> obj option
+    [<Struct>]
     type AestasChatMember = {uid: uint32; name: string}
     type AestasContent = 
         | AestasText of string 
@@ -193,6 +205,7 @@ module rec Core =
         | AestasFold of IMessageAdapterCollection
         | AestasMappingContent of IAestasMappingContent
         | ProtocolSpecifyContent of IProtocolSpecifyContent
+    [<Struct>]
     type AestasMessage = {
         sender: AestasChatMember
         content: AestasContent list
@@ -222,13 +235,14 @@ module rec Core =
                 else failwith "Domain ID mismatch"
         member this.Domains = groups :> IReadOnlyDictionary<uint32, AestasChatDomain> 
         member val ContentLoadStrategy = StrategyLoadAll with get, set
-        member val ReplyStrategy = StrategyReplyNone with get, set
-        member val CacheStrategy = StrategyCacheAll with get, set
+        member val MessageReplyStrategy = StrategyReplyNone with get, set
+        member val MessageCacheStrategy = StrategyCacheAll with get, set
         member val ContentParseStrategy = StrategyParseAndAlertError with get, set
+        member val ContextStrategy = StrategyContextReserveAll with get, set
         member val Commands: Dictionary<string, ICommand> = Dictionary() with get
         member val CommandPrivilegeMap: Dictionary<uint32, CommandPrivilege> = Dictionary() with get
-        member val MappingContentCtorTips: Dictionary<string, MappingContentCtor*(AestasBot->string)> = Dictionary() with get
-        member val ProtocolContentCtorTips: Dictionary<string, ProtocolSpecifyContentCtor*(AestasBot->string)> = Dictionary() with get
+        member val MappingContentCtorTips: Dictionary<string, struct(MappingContentCtor*(AestasBot->string))> = Dictionary() with get
+        member val ProtocolContentCtorTips: Dictionary<string, struct(ProtocolSpecifyContentCtor*(AestasBot->string))> = Dictionary() with get
         member val SystemInstructionBuilder: SystemInstructionBuilder option = None with get, set
         member val PrefixBuilder: PrefixBuilder option = None with get, set
         member _.ExtraData
@@ -249,15 +263,56 @@ module rec Core =
                 groups[domain.DomainId] <- domain
             else groups.Add(domain.DomainId, domain)
             domain.Bot <- Some this
+        member this.CheckContextLength (domain: AestasChatDomain) =
+            async {
+                match this.ContextStrategy, this.Model with
+                | StrategyContextTrimWhenExceedLength l, Some m when domain.Messages.Count >= l -> 
+                    let rec go i =
+                        if i = 0 then () else
+                        m.RemoveCache domain domain.Messages[0].MessageId
+                        domain.Messages.RemoveAt 0
+                        go (i-1)
+                    go (domain.Messages.Count - l / 2)
+                | StrategyContextTrimWhenExceedLength l, None when domain.Messages.Count >= l -> 
+                    let rec go i =
+                        if i = 0 then () else
+                        domain.Messages.RemoveAt 0
+                        go (i-1)
+                    go (domain.Messages.Count - l / 2)
+                | StrategyContextCompressWhenExceedLength l, Some m when domain.Messages.Count >= l -> 
+                    m.CacheContents this domain [AestasText $"**Please summarize all the above content to compress the chat history. Retain key memories, and delete the rest.**
+Format:
+## [Topic of the conversation]:
+
+[Summary of the conversation, including all details you consider important.]"]
+                    match! m.GetReply this domain with
+                    | Ok rmsg, _ -> 
+                        let s = 
+                            rmsg 
+                            |> List.choose (fun x -> 
+                                match x with
+                                | AestasText s -> Some s
+                                | _ -> None
+                            ) |> String.concat ""
+                        this.ClearCachedContext domain
+                        Logger.logInfo[0] $"Get compressed message: {s}"
+                        m.CacheContents this domain [AestasText s]
+                    | _ -> this.ClearCachedContext domain
+                | StrategyContextCompressWhenExceedLength l, None when domain.Messages.Count >= l -> 
+                    domain.Messages.Clear()
+                | _ -> ()
+            }
         member this.Reply (domain: AestasChatDomain) (message: IMessageAdapter) =
             async {
+                do! this.CheckContextLength domain
                 match this.Model with
                 | _ when groups.ContainsValue domain |> not -> return Error "This domain hasn't been added to this bot", ignore
                 | _ when message.SenderId = domain.Self.uid -> return Ok [], ignore
                 | _ when message.Command.IsSome ->
                     let command = message.Command.Value
                     Command.excecute {
-                        bot = this; domain = domain
+                        bot = this
+                        domain = domain
                         log = AestasText >> List.singleton >> domain.Send ignore >> Async.Ignore >> Async.Start
                         privilege = 
                             if this.CommandPrivilegeMap.ContainsKey message.SenderId then
@@ -268,7 +323,7 @@ module rec Core =
                 | None -> return Error "No model binded to this bot", ignore
                 | Some model ->
                     // check if illegal strategy
-                    match this.ReplyStrategy, this.CacheStrategy with
+                    match this.MessageReplyStrategy, this.MessageCacheStrategy with
                     | StrategyReplyAll, StrategyCacheNone ->
                         failwith "Check your strategy, you can't reply to message without any cache"
                     | _ -> ()
@@ -287,11 +342,11 @@ module rec Core =
                         let callback' (callback: AestasMessage -> unit) rmsg = 
                             domain.Messages.Add rmsg
                             rmsg.Parse() |> callback
-                        match this.CacheStrategy with
+                        match this.MessageCacheStrategy with
                         | StrategyCacheNone -> 
                             model.CacheMessage this domain message'
                             domain.Messages.Add message
-                            fun c r -> callback' c r; model.ClearCache()
+                            fun c r -> callback' c r; model.ClearCache domain
                         | StrategyCacheAll -> 
                             model.CacheMessage this domain message'
                             domain.Messages.Add message
@@ -302,7 +357,7 @@ module rec Core =
                             callback'
                         | _ ->
                             callback'
-                    match this.ReplyStrategy with
+                    match this.MessageReplyStrategy with
                     | StrategyReplyOnlyMentionedOrPrivate when message.Mention domain.Self.uid || domain.Private -> 
                         let! result, callback = model.GetReply this domain
                         return result, callback' callback
@@ -353,24 +408,24 @@ module rec Core =
         member this.ClearCachedContext(domain: AestasChatDomain) = 
             match this.Model with
             | None -> ()
-            | Some model -> model.ClearCache()
+            | Some model -> model.ClearCache domain
             domain.Messages.Clear()
             GC.Collect()
     type GenerationConfig = {
         temperature: float
-        max_length: int
-        top_k: int
-        top_p: float
+        maxLength: int
+        topK: int
+        topP: float
         }
     type CacheMessageCallback = AestasMessage -> unit
     type ILanguageModelClient =
-        /// bot -> domain -> message -> response * callback, with a certain sender in AestasMessage
+        /// bot -> domain -> message -> response * callback
         abstract member GetReply: bot: AestasBot -> domain: AestasChatDomain -> Async<Result<AestasContent list, string>*CacheMessageCallback>
         /// bot * domain * message -> unit, with a certain sender in AestasMessage, dont send the message
         abstract member CacheMessage: bot: AestasBot -> domain: AestasChatDomain -> message: AestasMessage -> unit
         /// bot * domain * contents -> unit, with no sender, dont send the message
         abstract member CacheContents: bot: AestasBot -> domain: AestasChatDomain -> contents: (AestasContent list) -> unit
-        abstract member ClearCache: unit -> unit
+        abstract member ClearCache: AestasChatDomain -> unit
         abstract member RemoveCache: domain: AestasChatDomain -> messageId: uint64 -> unit
     type UnitClient() =
         interface ILanguageModelClient with
@@ -380,7 +435,7 @@ module rec Core =
                 }
             member _.CacheMessage bot domain message = ()
             member _.CacheContents bot domain contents = ()
-            member _.ClearCache() = ()
+            member _.ClearCache domain = ()
             member _.RemoveCache domain messageID = ()
         end
     type CommandAccessibleDomain = 
@@ -1170,7 +1225,7 @@ module rec Core =
             | _ -> env.log <| String.Join("\n", "Error occured:"::errors)
     module Builtin =
         // f >> g, AutoInit.inputConverters >> (Builtin.inputConverters messages)
-        let rec modelInputConverters (c: IMessageAdapterCollection) = function
+        let rec modelInputConverters (domain: AestasChatDomain) = function
         | AestasText x -> x
         | AestasImage _ -> "#[image: not supported]"
         | AestasAudio _ -> "#[audio: not supported]"
@@ -1247,10 +1302,10 @@ module rec Core =
                         let content = overridePrimCtor[funcName] (domain, param, content)
                         result.Add content
                     else if bot.MappingContentCtorTips.ContainsKey funcName then
-                        let content = fst bot.MappingContentCtorTips[funcName] (domain, param, content)
+                        let content = fst' bot.MappingContentCtorTips[funcName] (domain, param, content)
                         content |> AestasMappingContent |> result.Add
                     else if bot.ProtocolContentCtorTips.ContainsKey funcName then
-                        let content = fst bot.ProtocolContentCtorTips[funcName] (domain, param, content)
+                        let content = fst' bot.ProtocolContentCtorTips[funcName] (domain, param, content)
                         content |> ProtocolSpecifyContent |> result.Add
                     else
                         match bot.ContentParseStrategy with
@@ -1283,8 +1338,8 @@ module rec Core =
             sb.Append prompt |> ignore
             sb.Append "## 2.Some functions for you\n" |> ignore
             overridePrimTip |> List.iter (fun (name, tips) -> sb.Append $"**{name}**:\n{tips}\n" |> ignore)
-            bot.MappingContentCtorTips |> Dict.iter (fun name (ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
-            bot.ProtocolContentCtorTips |> Dict.iter (fun name (ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
+            bot.MappingContentCtorTips |> Dict.iter (fun name struct(ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
+            bot.ProtocolContentCtorTips |> Dict.iter (fun name struct(ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
             sb.ToString()
         let buildPrefix (bot: AestasBot) (msg: AestasMessage) =
             {
@@ -1444,18 +1499,14 @@ module rec Core =
                 member _.Execute env args =
                     env.bot.ClearCachedContext env.domain
                     env.log "Cached context cleared"; Unit
-        let operators: Dictionary<string, ICommand> = dict' [
-            "id", IdentityCommand()
+        let operators = Map.ofList [
+            "id", IdentityCommand() :> ICommand
             "tuple", MakeTupleCommand()
             "proj", ProjectionCommand()
             "if", DummyIfCommand()
         ]
-        let commands: Dictionary<string, ICommand> = dict' [
-            "id", IdentityCommand()
-            "tuple", MakeTupleCommand()
-            "proj", ProjectionCommand()
-            "if", DummyIfCommand()
-            "version", VersionCommand()
+        let commands =  Map.ofList [
+            "version", VersionCommand() :> ICommand
             "domaininfo", DomainInfoCommand()
             "lsdomain", ListDomainCommand()
             "help", HelpCommand()
@@ -1481,3 +1532,61 @@ module rec Core =
         //         member _.CacheMessage bot domain message = ()
         //         member _.CacheContents bot domain contents = ()
         //         member _.ClearCache() = ()
+    module BotHelper =
+        let inline bindDomain (bot: AestasBot) domain =
+            bot.BindDomain domain
+        let inline addExtraData (bot: AestasBot) (key: string) (value: obj) =
+            bot.AddExtraData key value
+        let inline getPrimaryCommands() =
+            (Builtin.operators.Values |> List.ofSeq) @ (Builtin.commands.Values |> List.ofSeq)
+        let inline addCommand (bot: AestasBot) (cmd: ICommand) =
+            bot.Commands.Add(cmd.Name, cmd)
+        let inline addMappingContentCtorTip (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot->string) =
+            bot.MappingContentCtorTips.Add(name, (ctor, tip))
+        let inline addProtocolContentCtorTip (bot: AestasBot) (ctor: ProtocolSpecifyContentCtor, name: string, tip: AestasBot->string) =
+            bot.ProtocolContentCtorTips.Add(name, (ctor, tip))
+        let inline addCommandRange (bot: AestasBot) (cmds: ICommand list) =
+            cmds |> List.iter (addCommand bot)
+        let inline addMappingContentCtorTipRange (bot: AestasBot) ctorTips =
+            ctorTips |> List.iter (addMappingContentCtorTip bot)
+        let inline addProtocolContentCtorTipRange (bot: AestasBot) ctorTips =
+            ctorTips |> List.iter (addProtocolContentCtorTip bot)
+        let inline addSystemInstruction (bot: AestasBot) systemInstruction =
+            bot.SystemInstruction <- systemInstruction
+        let inline addSystemInstructionBuilder (bot: AestasBot) systemInstructionBuilder =
+            bot.SystemInstructionBuilder <- Some systemInstructionBuilder
+        type BotParameter = {
+            name: string
+            model: ILanguageModelClient
+            systemInstruction: string option
+            systemInstructionBuilder: SystemInstructionBuilder option
+            contentLoadStrategy: BotContentLoadStrategy option
+            contentParseStrategy: BotContentParseStrategy option
+            messageReplyStrategy: BotMessageReplyStrategy option
+            messageCacheStrategy: BotMessageCacheStrategy option
+            contextStrategy: BotContextStrategy option
+            inputPrefixBuilder: PrefixBuilder option
+            userCommandPrivilege: (uint32*CommandPrivilege) list option
+        }
+        let inline createBot botParam =
+            let bot = AestasBot()
+            let ``set?`` (target: 't -> unit) = function Some x -> target x | None -> ()
+            bot.Name <- botParam.name
+            bot.Model <- Some botParam.model
+            ``set?`` bot.set_SystemInstruction botParam.systemInstruction
+            bot.SystemInstructionBuilder <- botParam.systemInstructionBuilder
+            ``set?`` bot.set_ContentLoadStrategy botParam.contentLoadStrategy
+            ``set?`` bot.set_MessageReplyStrategy botParam.messageReplyStrategy
+            ``set?`` bot.set_MessageCacheStrategy botParam.messageCacheStrategy
+            ``set?`` bot.set_ContentParseStrategy botParam.contentParseStrategy
+            ``set?`` bot.set_ContextStrategy botParam.contextStrategy
+            bot.PrefixBuilder <- botParam.inputPrefixBuilder
+            match botParam.userCommandPrivilege with
+            | Some x -> x |> List.iter (fun (uid, privilege) -> bot.CommandPrivilegeMap.Add(uid, privilege))
+            | _ -> ()
+            bot
+        let inline createBotSimple name model =
+            let bot = AestasBot()
+            bot.Name <- name
+            bot.Model <- Some model
+            bot

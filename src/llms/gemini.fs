@@ -19,14 +19,14 @@ module Gemini =
     type GPart = 
         | Text of GText 
         | InlineData of GInlineData
-    type GContent = {role: string; parts: GPart[]}
+    type GContent = {role: string; parts: IList<GPart>}
     type GSafetySetting = {category: string; threshold: string}
     type GSafetyRatting = {category: string; probability: string}
     type GProfile = {
         api_key: string option
         gcloudpath: string option
         safetySettings: GSafetySetting[]
-        generation_configs: IDictionary<string, GenerationConfig> option
+        generation_configs: GenerationConfig option
         }
     type GGenerationConfig = {
         maxOutputTokens: int
@@ -72,26 +72,32 @@ module Gemini =
                 return Ok result
             else return Error result
         }
-    type GeminiLlm (profile: GProfile, flash: bool) =
-        let model = if flash then "gemini-1.5-flash-latest" else "gemini-1.5-pro-latest"
+    type GeminiLlm (profile: GProfile, model: string) =
         let generationConfig = 
             match profile.generation_configs with
             | None -> None
             | Some gs -> Some {
-                    maxOutputTokens = gs[model].max_length; 
-                    temperature = gs[model].temperature;
-                    topP = gs[model].top_p;
-                    topK = gs[model].top_k
+                    maxOutputTokens = gs.maxLength; 
+                    temperature = gs.temperature;
+                    topP = gs.topP;
+                    topK = gs.topK
                 }
-        let contentsCache = Dictionary<AestasChatDomain, arrList<struct(GContent*uint64)>>()
+        let contentsCache = Dictionary<AestasChatDomain, struct(GContent*uint64) arrList>()
         let parseContents (domain: AestasChatDomain) (contents: AestasContent list) =
-            let parts = Array.zeroCreate<GPart> contents.Length
-            let iAmMLLM i = function
+            let parts = arrList<GPart>()
+            let parse i = function
             | AestasImage(bs, mime, w, h) -> 
-                parts[i] <- InlineData {inline_data = {mime_type = mime; data = bs |> Convert.ToBase64String}}
+                parts.Add <| InlineData {inline_data = {mime_type = mime; data = bs |> Convert.ToBase64String}}
+            | AestasQuote mid ->
+                match contentsCache[domain] |> ArrList.tryFindBack (snd' >> ( = ) mid) with
+                | Some msg -> 
+                    parts.Add <| Text {text = "#[quote:" }
+                    parts.AddRange (fst' msg).parts
+                    parts.Add <| Text {text = "]" }
+                | None -> parts.Add <| Text {text = "#[quote: ...]" }
             | x -> 
-                parts[i] <- Text {text = Builtin.modelInputConverters domain.Messages x}// !
-            contents |> List.iteri iAmMLLM
+                parts.Add <| Text {text = Builtin.modelInputConverters domain x}// !
+            contents |> List.iteri parse
             {role = "user"; parts = parts}
         interface ILanguageModelClient with
             member this.CacheMessage bot domain message =
@@ -104,9 +110,7 @@ module Gemini =
                 async {
                     let countCache = contentsCache[domain].Count
                     let! response = 
-                        let apiLink = 
-                            if flash then  "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash-latest:generateContent"
-                            else "https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-pro-latest:generateContent"
+                        let apiLink = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
                         let temp = Array.init (contentsCache[domain].Count) (fun i -> fst' (contentsCache[domain][i]))
                         let system =
                             {role = "system"; parts = [|Text {text = bot.SystemInstruction}|]}
@@ -121,7 +125,7 @@ module Gemini =
                             | Text t -> t.text.Replace("\n\n", "\n")
                             | InlineData _ -> ""
                             with ex -> 
-                                logError[0] $"Gemini response parse failed: {ex}"
+                                logError[0] $"Gemini response parse failed: {ex}, {response}"
                                 "..."
                         return response.TrimEnd() |> Builtin.modelOutputParser bot domain |> Ok, 
                         fun msg -> 
@@ -130,11 +134,11 @@ module Gemini =
                         logError[0] $"Gemini request failed: {result}" 
                         return Error result, ignore
                 }
-            member _.ClearCache() = contentsCache.Clear()
-            member _.RemoveCache domain messageID =
+            member _.ClearCache domain = if contentsCache.ContainsKey domain then contentsCache[domain].Clear()
+            member _.RemoveCache domain messageId =
                 match
                     contentsCache[domain] |>
-                    ArrList.tryFindIndexBack (fun x -> snd' x = messageID) 
+                    ArrList.tryFindIndexBack (fun x -> snd' x = messageId) 
                 with
                 | Some i -> contentsCache[domain].RemoveAt i
                 | None -> ()

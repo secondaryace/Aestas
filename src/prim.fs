@@ -9,7 +9,7 @@ open System.Text.Unicode
 open System.Net.Http
 
 module Prim = 
-    let version = Version(0, 240817)
+    let version = Version(0, 240901)
     #if DEBUG
     let debug = true
     #else
@@ -17,6 +17,10 @@ module Prim =
     #endif
     let ( >.|> ) f g a b =  g b (f a b)
     let ( >..|> ) f g a b = g (f a b) b
+    let inline curry f a b = f(a, b)
+    let inline curry3 f a b c = f(a, b, c)
+    let inline curry4 f a b c d = f(a, b, c, d)
+    let inline uncurry f (a, b) = f a b
     let inline is<'t when 't: not struct> (a: obj) =
         match a with
         | :? 't -> true
@@ -129,6 +133,10 @@ module Prim =
             match list |> tryFindBack predicate with
             | Some x -> x
             | None -> failwith "Not found"
+        let inline collect (mapping: 't -> 'u) (list: arrList<'t>) =
+            let result = new arrList<'u>(list.Count)
+            list |> iter (fun x -> mapping x |> result.Add)
+            result
     module IListExt =
         let inline map (mapping: 't -> 'u) (list: IList<'t>) =
             let result = arrList<'u>()
@@ -196,6 +204,18 @@ module Prim =
             dict |> iter (fun k v -> if keys |> Array.contains k then this.Add(k, v))
         let inline addAll (this: Dictionary<'k, 'v>) (dict: IReadOnlyDictionary<'k, 'v>) =
             dict |> iter (fun k v -> this.Add(k, v))
+        let inline tryFind (predicate: 'k -> 'v -> bool) (dict: IReadOnlyDictionary<'k, 'v>) =
+            let rec go itor =
+                if Itor.moveNext itor then
+                    let k, v = deconstructPair itor.Current
+                    if predicate k v then Some (k, v)
+                    else go itor
+                else None
+            go (dict |> Itor.ofEnumerable)
+        let inline find (predicate: 'k -> 'v -> bool) (dict: IReadOnlyDictionary<'k, 'v>) =
+            match dict |> tryFind predicate with
+            | Some x -> x
+            | None -> failwith "Not found"
         
     type Collections.Generic.Dictionary<'k, 'v> with
         member inline this.Append(d: IReadOnlyDictionary<'k, 'v>) =
@@ -210,6 +230,7 @@ module Prim =
                 sb.Append(';').Append(p.Key).Append(": ").Append(p.Value) |> ignore
         sb.ToString()
     let inline dict' a = a |> dict |> Dictionary
+    let inline readOnlyDict' (a: ('a * 'b) seq) = a |> dict |> Dictionary :> IReadOnlyDictionary<'a, 'b>
     let colorAt (arr: byte[]) w x y =
         let i = 4*(w*y+x)
         struct(arr[i], arr[i+1], arr[i+2], arr[i+3])
@@ -220,7 +241,6 @@ module Prim =
         for _ = 1 to length do
             sb.Append(chars[rand.Next(chars.Length)]) |> ignore
         sb.ToString()
-    
     let bytesFromUrl (url: string) =
         try
         use web = new HttpClient()
@@ -264,3 +284,4 @@ module Prim =
         p.WaitForExit() |> ignore
         p.Kill()
         result
+    [<Measure>] type sec

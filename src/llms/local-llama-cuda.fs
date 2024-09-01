@@ -59,10 +59,12 @@ module LocalLLama =
             use context = model.CreateContext parameters
             let executor = new InteractiveExecutor(context)
             let inferenceParams = new InferenceParams()
-            inferenceParams.MaxTokens <- generationConfig.max_length
+            inferenceParams.MaxTokens <- generationConfig.maxLength
             inferenceParams.AntiPrompts <- [|"<|eot_id|>";|]
             let pipeline = new Sampling.DefaultSamplingPipeline()
             pipeline.Temperature <- generationConfig.temperature |> float32
+            pipeline.TopP <- generationConfig.topP |> float32
+            pipeline.TopK <- generationConfig.topK
             inferenceParams.SamplingPipeline <- pipeline
             let sb = new StringBuilder()
             let aitor = executor.InferAsync(s, inferenceParams).GetAsyncEnumerator()

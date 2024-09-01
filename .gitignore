@@ -8,6 +8,8 @@ temp/*
 logs/*
 profiles/*
 src/bots/*
+!src/bots/templateBot.fs
+!src/bots/templateBot.fs.ignore
 src/.obsolete/*
 extensions/Aestas.Test.CSharp/.vs/*
 extensions/Aestas.Test.CSharp/obj/*
