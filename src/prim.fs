@@ -137,7 +137,7 @@ module Prim =
             let result = new arrList<'u>(list.Count)
             list |> iter (fun x -> mapping x |> result.Add)
             result
-    module IListExt =
+    module IList =
         let inline map (mapping: 't -> 'u) (list: IList<'t>) =
             let result = arrList<'u>()
             let rec go i =
@@ -220,15 +220,19 @@ module Prim =
     type Collections.Generic.Dictionary<'k, 'v> with
         member inline this.Append(d: IReadOnlyDictionary<'k, 'v>) =
             Dict.addAll this d
-        
-    let buildDatabasePrompt (system: string) (db: arrList<Dictionary<string, string>>) = 
-        let sb = StringBuilder()
-        sb.Append(system) |> ignore
-        sb.Append("*Following is a dictionary for you:*") |> ignore
-        for dic in db do
-            for p in dic do
-                sb.Append(';').Append(p.Key).Append(": ").Append(p.Value) |> ignore
-        sb.ToString()
+    type PipeLineChain<'t>(fs: ('t -> 't) seq) =
+        let chain = arrList<'t -> 't> fs
+        member this.Inner = chain
+        member this.Bind g = chain.Add g
+        member this.BindFunc (func: Func<'t, 't>) = chain.Add func.Invoke
+        member this.Unbind g = chain.Remove g
+        member this.Invoke (x: 't) = chain |> ArrList.fold (fun x f -> f x) x
+        new(f: 't -> 't) = PipeLineChain([f])
+        static member FromFunc(f: Func<'t, 't>) = PipeLineChain([f.Invoke])
+        static member FromFunc(fs: Func<'t, 't> seq) = PipeLineChain(fs |> Seq.map (fun f -> f.Invoke))
+    module PipeLineChain =
+        let inline create (fs: ('t -> 't) seq) = PipeLineChain fs
+        let inline bind (chain: PipeLineChain<'t>) f = chain.Bind f
     let inline dict' a = a |> dict |> Dictionary
     let inline readOnlyDict' (a: ('a * 'b) seq) = a |> dict |> Dictionary :> IReadOnlyDictionary<'a, 'b>
     let colorAt (arr: byte[]) w x y =

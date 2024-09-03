@@ -73,19 +73,18 @@ module Gsv_Acgnai =
         else
             Logger.logInfo[0] $"Gsv_Acgnai Error: {response.ReasonPhrase}"
             raise <| new Exception(response.ReasonPhrase)
-    type Gsv_AcgnaiContent(content: string*string) =
-        interface IAestasMappingContent with
-            member _.Convert bot domain = 
-                match bot.ExtraData("gsv") with
-                | Some (:? Gsv_Acgnai_Profile as profile) -> 
-                    let voice = getVoice profile content
-                    AestasAudio(voice, "audio/wav")
-                | _ -> AestasText("Error: No gsv profile found")
-        interface IAutoInit<(ContentParam->IAestasMappingContent)*string*(AestasBot -> string), unit> with
+    type Gsv_AcgnaiParser =
+        interface IAutoInit<string*MappingContentCtor*(AestasBot -> string), unit> with
             static member Init _ = 
-                (fun (domain, params', content) ->
-                    params'.Head |> Gsv_AcgnaiContent :> IAestasMappingContent), "gsvVoice", (fun _ ->
+                "gsvVoice"
+                , fun bot domain params' content ->
+                    match bot.TryGetExtraData("gsv") with
+                    | Some (:? Gsv_Acgnai_Profile as profile) -> 
+                        let voice = params'.Head |> getVoice profile
+                        AestasAudio(voice, "audio/wav") |> Ok
+                    | _ -> Error "Couldn't find gsv data"
+                , fun _ ->
                 """You may send voice messages like #[gsvVoice@emotion=content].
 emotion can be one of "难过_sad", "生气_angry", "开心_happy", "中立_neutral".
-e.g. #[gsvVoice@开心_happy=你好呀！]""")
+e.g. #[gsvVoice@开心_happy=你好呀！]"""
             

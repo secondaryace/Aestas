@@ -159,10 +159,10 @@ module rec Core =
         | StrategyParseAllToPlainText
         /// Parse all content to AestasContent, ignore errors
         | StrategyParseAndIgnoreError
-        /// Parse all content to AestasContent, alert errors like <no such function [{funcName}]>
+        /// Parse all content to AestasContent, alert errors like <Couldn't find function [{funcName}]>
         | StrategyParseAndAlertError
-        /// Parse all content to AestasContent, parse errors format to plain text, like [func: content] -> content
-        | StrategyParseAndDestructErrorFormat
+        /// Parse all content to AestasContent, restore content to original if error occurs
+        | StrategyParseAndRestoreError
     type BotContextStrategy =
         /// Trim context when exceed length
         | StrategyContextTrimWhenExceedLength of int
@@ -178,12 +178,6 @@ module rec Core =
         | CurveInterestTruncateAfterTime of int<sec>
         /// Use your own function to determine interest
         | CurveInterestFunction of (int<sec> -> int)
-    /// Used in Aestas.Core <-> Model
-    /// Implement this interface to box any object to a AestasContent.
-    /// For example, model returns [mstts@emotion=Cheerful: Hello], use this to store and convert is to AestasAudio
-    type IAestasMappingContent =
-        /// Convert this to a normal AestasContent
-        abstract member Convert: AestasBot -> AestasChatDomain -> AestasContent
     /// Used in Model <-> Aestas.Core <-> Protocol
     /// Provide extra content type. For example, market faces in QQ
     type IProtocolSpecifyContent =
@@ -195,6 +189,7 @@ module rec Core =
     [<Struct>]
     type AestasChatMember = {uid: uint32; name: string}
     type AestasContent = 
+        | AestasBlank
         | AestasText of string 
         /// byte array, mime type, width, height
         | AestasImage of byte[]*string*int*int
@@ -203,7 +198,6 @@ module rec Core =
         | AestasMention of AestasChatMember
         | AestasQuote of uint64
         | AestasFold of IMessageAdapterCollection
-        | AestasMappingContent of IAestasMappingContent
         | ProtocolSpecifyContent of IProtocolSpecifyContent
     [<Struct>]
     type AestasMessage = {
@@ -213,10 +207,10 @@ module rec Core =
         }
     type InputConverterFunc = IMessageAdapterCollection -> AestasContent -> string
     /// domain * params * content
-    type ContentParam = AestasChatDomain*list<string*string>*string
-    type OverridePluginFunc = ContentParam -> AestasContent
-    type MappingContentCtor = ContentParam -> IAestasMappingContent
-    type ProtocolSpecifyContentCtor = ContentParam -> IProtocolSpecifyContent
+    type 't ContentCtor = AestasBot -> AestasChatDomain -> (string*string) list -> string -> 't
+    type OverridePluginFunc = AestasContent ContentCtor
+    type MappingContentCtor = Result<AestasContent, string> ContentCtor
+    type ProtocolSpecifyContentCtor = Result<IProtocolSpecifyContent, string> ContentCtor
     type SystemInstructionBuilder = AestasBot -> string -> string
     type PrefixBuilder = AestasBot -> AestasMessage -> AestasMessage
     /// Bot class used in Aestas Core
@@ -243,18 +237,21 @@ module rec Core =
         member val CommandPrivilegeMap: Dictionary<uint32, CommandPrivilege> = Dictionary() with get
         member val MappingContentCtorTips: Dictionary<string, struct(MappingContentCtor*(AestasBot->string))> = Dictionary() with get
         member val ProtocolContentCtorTips: Dictionary<string, struct(ProtocolSpecifyContentCtor*(AestasBot->string))> = Dictionary() with get
-        member val SystemInstructionBuilder: SystemInstructionBuilder option = None with get, set
+        member val SystemInstructionBuilder: PipeLineChain<AestasBot*StringBuilder> option = None with get, set
         member val PrefixBuilder: PrefixBuilder option = None with get, set
-        member _.ExtraData
+        member _.TryGetExtraData
             with get key =
                 if extraData.ContainsKey key then Some extraData[key] else None
+        member _.ExtraData = extraData
         member this.AddExtraData (key: string) (value: obj) = 
             if extraData.ContainsKey key then failwith "Key already exists"
             else extraData.Add(key, value)
         member this.SystemInstruction 
             with get() = 
                 match this.SystemInstructionBuilder with
-                | Some b -> b this originalSystemInstruction
+                | Some b -> 
+                    let sb = new StringBuilder(originalSystemInstruction)
+                    (b.Invoke(this, sb) |> snd).ToString()
                 | None -> originalSystemInstruction
             and set value = originalSystemInstruction <- value
         member this.BindDomain (domain: AestasChatDomain) = 
@@ -389,7 +386,7 @@ Format:
             }
         member this.Recall (domain: AestasChatDomain) (messageId: uint64) = 
             async {
-                let messageInd = domain.Messages |> IListExt.tryFindIndexBack (fun x -> x.MessageId = messageId)
+                let messageInd = domain.Messages |> IList.tryFindIndexBack (fun x -> x.MessageId = messageId)
                 match messageInd with
                 | None -> return Error "Message not found"
                 | Some messageInd ->
@@ -427,17 +424,6 @@ Format:
         abstract member CacheContents: bot: AestasBot -> domain: AestasChatDomain -> contents: (AestasContent list) -> unit
         abstract member ClearCache: AestasChatDomain -> unit
         abstract member RemoveCache: domain: AestasChatDomain -> messageId: uint64 -> unit
-    type UnitClient() =
-        interface ILanguageModelClient with
-            member _.GetReply bot domain  = 
-                async {
-                    return Ok [], ignore
-                }
-            member _.CacheMessage bot domain message = ()
-            member _.CacheContents bot domain contents = ()
-            member _.ClearCache domain = ()
-            member _.RemoveCache domain messageID = ()
-        end
     type CommandAccessibleDomain = 
         | None = 0 
         | Private = 1 
@@ -466,7 +452,7 @@ Format:
     [<StructuredFormatDisplay("{Display}")>]
     type Atom =
         | AtomTuple of Atom list
-        | AtomObject of (string*Atom) list
+        | AtomObject of Map<string, Atom>
         | Number of float
         | String of string
         | Identifier of string
@@ -476,12 +462,87 @@ Format:
                 match this with
                 | AtomTuple l -> $"""({l |> List.map (fun x -> x.Display) |> String.concat ", "})"""
                 | AtomObject l -> $"""{{
-{l |> List.map (fun (k, v) -> $"  {k} = {v.Display}") |> String.concat "\n"}
+{l 
+    |> Map.map (fun k v -> $"  {k} = {v.Display}") |> Map.values |> String.concat "\n"}
 }}"""
                 | Number n -> n.ToString()
                 | String s -> $"\"{s}\""
                 | Identifier i -> i
                 | Unit -> "()"
+    type UnitMessageAdapter(message: AestasMessage, collection: UnitMessageAdapterCollection) =
+        interface IMessageAdapter with
+            member _.Mention uid = message.content |> List.exists (fun x -> 
+                match x with
+                | AestasMention m -> m.uid = uid
+                | _ -> false)
+            member _.Parse() = message
+            member _.ParseAsPlainText() = {
+                content = message.content 
+                |> List.map (function | AestasText s -> s | _ -> "") 
+                |> String.concat "" |> AestasText |> List.singleton
+                mid = message.mid
+                sender = message.sender
+                }   
+            member _.Collection = collection
+            member _.Command =
+                match message.content with
+                | AestasText s::_ when s.StartsWith("#") -> 
+                    Some s[1..]
+                | _ -> None
+            member _.MessageId = message.mid
+            member _.Preview = message.content |> List.map (function | AestasText s -> s | _ -> "") |> String.concat ""
+            member _.SenderId = message.sender.uid
+    type UnitMessageAdapterCollection(domain: VirtualDomain) =
+        inherit arrList<IMessageAdapter>()
+        interface IMessageAdapterCollection with
+            member this.GetReverseIndex with get (_, i) = this.Count-i-1    
+            member this.Parse() = this.ToArray() |> Array.map (fun x -> x.Parse())
+            member _.Domain = domain
+        end                 
+    type VirtualDomain(send, recall, bot, user, domainId, domainName, isPrivate) as this=
+        inherit AestasChatDomain()
+        let members = [user; bot] |> arrList
+        let messages = UnitMessageAdapterCollection this
+        let mutable mid = 0UL
+        override _.Private = isPrivate
+        override _.DomainId = domainId
+        override _.Self = bot
+        override _.Virtual = {name = "Virtual"; uid = UInt32.MaxValue}
+        override _.Name = domainName
+        override _.Messages = messages
+        override _.Members = members.ToArray()
+        override val Bot = None with get, set
+        override _.Send callback contents =
+            async {
+                send contents
+                UnitMessageAdapter({sender = bot; content = contents; mid = mid}, messages) |> callback
+                mid <- mid + 1UL
+                return Ok ()
+            }
+        override _.Recall messageId =
+            async {
+                match messages |> ArrList.tryFindIndexBack (fun x -> x.MessageId = messageId) with
+                | None -> return false
+                | Some i -> 
+                    recall messageId
+                    messages.RemoveAt i
+                    return true
+            }
+        member this.Input contents =
+            let message = {sender = user; content = contents; mid = mid}
+            mid <- mid + 1UL
+            UnitMessageAdapter(message, messages) |> this.OnReceiveMessage
+    type UnitClient() =
+        interface ILanguageModelClient with
+            member _.GetReply bot domain  = 
+                async {
+                    return Ok [], ignore
+                }
+            member _.CacheMessage bot domain message = ()
+            member _.CacheContents bot domain contents = ()
+            member _.ClearCache domain = ()
+            member _.RemoveCache domain messageID = ()
+        end
     module Console =
         let inline resolution() = struct(Console.WindowWidth, Console.WindowHeight)
         let inline clear() = Console.Clear()
@@ -1223,6 +1284,77 @@ Format:
                 | Unit -> ()
                 | x -> env.log <| x.ToString()
             | _ -> env.log <| String.Join("\n", "Error occured:"::errors)
+    module CommandHelper =
+        /// Use this type to tell the parser how to parse the arguments
+        type CommandParameters =
+            /// To require a unit value parameter, Ctor: name
+            | ParamUnit of Name: string
+            /// To require a string value parameter, Ctor: name * default value
+            | ParamString of Name: string*(string option)
+            /// To require a identifier value parameter, Ctor: name * default value
+            | ParamIdentifier of Name: string*(string option)
+            /// To require a number value parameter, Ctor: name * default value
+            | ParamNumber of Name: string*(float option)
+            /// To require a tuple value parameter, Ctor: name * default value
+            | ParamTuple of Name: string*(Atom list option)
+            /// To require a object value parameter, Ctor: name * default value
+            | ParamObject of Name: string*(Map<string, Atom> option)
+        /// Parse result
+        type CommandArguments =
+            /// Indicates that the argument is not provided
+            | ArgNone
+            /// Indicates that the argument is provided a unit value
+            | ArgUnit
+            /// Indicates that the argument is provided a string value
+            | ArgString of string
+            /// Indicates that the argument is provided a identifier value
+            | ArgIdentifier of Name: string
+            /// Indicates that the argument is provided a number value
+            | ArgNumber of Name: float
+            /// Indicates that the argument is provided a tuple value
+            | ArgTuple of Name: Atom list
+            /// Indicates that the argument is provided a object value
+            | ArgObject of Name: Map<string, Atom>
+        let inline getParamName p =
+            match p with 
+            | ParamUnit n -> n
+            | ParamString (n, _) -> n
+            | ParamIdentifier (n, _) -> n
+            | ParamNumber (n, _) -> n
+            | ParamTuple (n, _) -> n
+            | ParamObject (n, _) -> n
+        let inline getParamDefaultValue p =
+            match p with 
+            | ParamUnit _ -> ArgNone
+            | ParamString (_, d) -> match d with | Some x -> ArgString x | None -> ArgNone
+            | ParamIdentifier (_, d) -> match d with | Some x -> ArgIdentifier x | None -> ArgNone
+            | ParamNumber (_, d) -> match d with | Some x -> ArgNumber x | None -> ArgNone
+            | ParamTuple (_, d) -> match d with | Some x -> ArgTuple x | None -> ArgNone
+            | ParamObject (_, d) -> match d with | Some x -> ArgObject x | None -> ArgNone
+        let parseArguments (params': CommandParameters seq) args =
+            let params' = params' |> Seq.map (fun p -> getParamName p, p) |> Map.ofSeq
+            let rec go params' args acc errors =
+                match args with
+                | [] -> params', acc, errors
+                | Identifier x::v::t when params' |> Map.containsKey x ->
+                    match v, params'[x] with
+                    | String s, ParamString (_, _) -> go (Map.remove x params') t (Map.add x (ArgString s) acc) errors
+                    | Identifier i, ParamIdentifier (_, _) -> go (Map.remove x params') t (Map.add x (ArgIdentifier i) acc) errors
+                    | Number n, ParamNumber (_, _) -> go (Map.remove x params') t (Map.add x (ArgNumber n) acc) errors
+                    | AtomTuple t', ParamTuple (_, _) -> go (Map.remove x params') t (Map.add x (ArgTuple t') acc) errors
+                    | AtomObject o, ParamObject (_, _) -> go (Map.remove x params') t (Map.add x (ArgObject o) acc) errors
+                    | Unit, ParamUnit _ -> go (Map.remove x params') t (Map.add x ArgUnit acc) errors
+                    | _, ParamUnit _ -> go (Map.remove x params') t (Map.add x ArgUnit acc) errors
+                    | _, _ -> go (Map.remove x params') t (Map.add x ArgUnit acc) ($"Couldn't parse argument {x}: Type mismatch"::errors)
+                | Identifier x::[] when params' |> Map.containsKey x ->
+                    match params'[x] with
+                    | ParamUnit _ -> go (Map.remove x params') [] (Map.add x ArgUnit acc) errors
+                    | _ -> go (Map.remove x params') [] (Map.add x ArgUnit acc) ($"Couldn't parse argument {x}: Unexpected end of input"::errors)
+                | _ -> 
+                    params', acc, $"""Couldn't parse argument {Map.keys params' |> Seq.map (fun x -> x.ToString()) |> String.concat ", "}: Bad input, ignored {args}"""::errors
+            let params', args, errors = go params' args Map.empty []
+            if params'.Count = 0 then args, errors else
+            Map.fold (fun acc k v -> Map.add k (getParamDefaultValue v) acc) args params', errors
     module Builtin =
         // f >> g, AutoInit.inputConverters >> (Builtin.inputConverters messages)
         let rec modelInputConverters (domain: AestasChatDomain) = function
@@ -1296,32 +1428,40 @@ Format:
                     checkCache()
                     //#[name@pram=m@pram'=n:content]
                     let i, funcName, param, content, _ = scanBracket (i+2) 1 "" []
-                    sprintf "funcName: %s, param: %A, content: %s" funcName param content |> Logger.logInfo[0]
+                    let error s =
+                        match bot.ContentParseStrategy with
+                        | StrategyParseAndAlertError ->
+                            s |> AestasText |> result.Add
+                        | StrategyParseAndRestoreError ->
+                            let sb = StringBuilder()
+                            sb.Append("#[").Append(funcName) |> ignore
+                            param |> List.iter (fun (p, v) -> sb.Append('@').Append(p).Append('=').Append(v) |> ignore)
+                            if content |> String.IsNullOrEmpty |> not then 
+                                sb.Append(':').Append(content) |> ignore
+                            sb.ToString() |> AestasText |> result.Add
+                        | _ -> ()
+                    //sprintf "funcName: %s, param: %A, content: %s" funcName param content |> Logger.logInfo[0]
                     try
                     if overridePrimCtor.ContainsKey funcName then
                         let content = overridePrimCtor[funcName] (domain, param, content)
                         result.Add content
                     else if bot.MappingContentCtorTips.ContainsKey funcName then
-                        let content = fst' bot.MappingContentCtorTips[funcName] (domain, param, content)
-                        content |> AestasMappingContent |> result.Add
+                        match fst' bot.MappingContentCtorTips[funcName] bot domain param content with
+                        | Ok content ->
+                            content |> result.Add
+                        | Error emsg ->
+                            error $"<Error occured when parsing [{funcName}]: {emsg}>"
                     else if bot.ProtocolContentCtorTips.ContainsKey funcName then
-                        let content = fst' bot.ProtocolContentCtorTips[funcName] (domain, param, content)
-                        content |> ProtocolSpecifyContent |> result.Add
+                        match fst' bot.ProtocolContentCtorTips[funcName] bot domain param content with
+                        | Ok content ->
+                            content |> ProtocolSpecifyContent |> result.Add
+                        | Error emsg ->
+                            error $"<Error occured when parsing [{funcName}]: {emsg}>"
                     else
-                        match bot.ContentParseStrategy with
-                        | StrategyParseAndAlertError ->
-                            $"<no such function [{funcName}]>" |> AestasText |> result.Add
-                        | StrategyParseAndDestructErrorFormat ->
-                            content |> AestasText |> result.Add
-                        | _ -> ()
+                        error $"<Couldn't find function [{funcName}] with param: {param}, content: {content}>"
                         // log here
                     with ex ->
-                        match bot.ContentParseStrategy with
-                        | StrategyParseAndAlertError ->
-                            $"<error occured when parsing [{funcName}]: {ex.Message}>" |> AestasText |> result.Add
-                        | StrategyParseAndDestructErrorFormat ->
-                            content |> AestasText |> result.Add
-                        | _ -> ()
+                        error $"<Error occured when parsing [{funcName}]: {ex.Message}>"
                     go i
                 | _ -> 
                     cache.Append botOut[i] |> ignore
@@ -1332,15 +1472,16 @@ Format:
             | _ ->
                 go 0
                 result |> List.ofSeq
-        let buildSystemInstruction (bot: AestasBot) (prompt: string) =
-            let sb = StringBuilder()
+        let buildSystemInstruction (bot: AestasBot, sb: StringBuilder) =
+            let prompt = sb.ToString()
+            sb.Clear() |> ignore
             sb.Append "## 1.About yourself\n" |> ignore
             sb.Append prompt |> ignore
             sb.Append "## 2.Some functions for you\n" |> ignore
             overridePrimTip |> List.iter (fun (name, tips) -> sb.Append $"**{name}**:\n{tips}\n" |> ignore)
             bot.MappingContentCtorTips |> Dict.iter (fun name struct(ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
             bot.ProtocolContentCtorTips |> Dict.iter (fun name struct(ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
-            sb.ToString()
+            bot, sb
         let buildPrefix (bot: AestasBot) (msg: AestasMessage) =
             {
                 content = AestasText $"[{msg.sender.name}|{DateTime.Now:``yyyy-MM-dd HH:mm``}] "::msg.content
@@ -1390,8 +1531,8 @@ Format:
                         let rec go acc = function
                         | [] -> acc |> List.rev
                         | AtomObject o::t -> 
-                            match o |> List.tryFind (fst >> ( = ) x) with
-                            | Some (_, v) -> go (AtomObject([x, v])::acc) t
+                            match o |> Map.tryFind x with
+                            | Some v -> go (AtomObject(Map [x, v])::acc) t
                             | None -> env.log $"Key {x} not found"; go (Unit::acc) t
                         | _ -> env.log "Expected object"; go (Unit::acc) []
                         go [] ls |> AtomTuple
@@ -1402,11 +1543,11 @@ Format:
                             ((xs 
                             |> List.map (function
                                 | Identifier x -> 
-                                    match o |> List.tryFind (fst >> ( = ) x) with
-                                    | Some (_, v) -> x, v
+                                    match o |> Map.tryFind x with
+                                    | Some v -> x, v
                                     | None -> env.log $"Key {x} not found"; "_", Unit
                                 | _ -> env.log "Expected identifier"; "_", Unit)
-                            |> AtomObject)::acc |> go) t
+                            |> Map |> AtomObject)::acc |> go) t
                         | _ -> env.log "Expected object"; go (Unit::acc) []
                         go [] ls |> AtomTuple
                     | _ -> env.log "Expected identifier and object tuple"; Unit
@@ -1433,11 +1574,11 @@ Format:
                 member _.AccessibleDomain = CommandAccessibleDomain.All
                 member _.Privilege = CommandPrivilege.Normal
                 member _.Execute env args =
-                    AtomObject [
+                    Map [
                         "id", env.domain.DomainId |> float |> Number
                         "name", env.domain.Name |> String
                         "private", if env.domain.Private then Number 1. else Number 0.
-                        ]
+                    ] |> AtomObject
         type ListDomainCommand() =
             interface ICommand with
                 member _.Name = "lsdomain"
@@ -1448,11 +1589,11 @@ Format:
                     let sb = StringBuilder()
                     env.bot.Domains |>
                     Seq.map (fun p ->
-                        AtomObject [
+                        Map [
                             "id", p.Value.DomainId |> float |> Number
                             "name", p.Value.Name |> String
                             "private", if p.Value.Private then Number 1. else Number 0.
-                            ])
+                        ] |> AtomObject)
                     |> List.ofSeq
                     |> AtomTuple
         type HelpCommand() =
@@ -1470,16 +1611,19 @@ Format:
         type DumpCommand() =
             interface ICommand with
                 member _.Name = "dump"
-                member _.Help = """Dump the cached context | Usage: dump [reverseIndexStart=count-1] [reverseIndexEnd=0]"""
+                member _.Help = """Dump the cached context, the input index is from the end of the context | Usage: dump [from=count-1] [to=0]"""
                 member _.AccessibleDomain = CommandAccessibleDomain.All
                 member _.Privilege = CommandPrivilege.Normal
                 member _.Execute env args =
                     let msgs = env.domain.Messages
+                    let args, _ = args |> CommandHelper.parseArguments [
+                        CommandHelper.ParamNumber("from", msgs.Count-1 |> float |> Some)
+                        CommandHelper.ParamNumber("to", Some 0.)
+                    ]
                     let s, t =
-                        match args with
-                        | Number x::[] -> msgs.Count-1-int x, msgs.Count-1
-                        | Number x::Number y::[] -> msgs.Count-1-int x, msgs.Count-1-int y
-                        | _ -> 0, msgs.Count-1
+                        match args["from"], args["to"] with
+                        | CommandHelper.ArgNumber x, CommandHelper.ArgNumber y -> msgs.Count-1-int x, msgs.Count-1-int y
+                        | _ -> failwith "Should not happen"
                     let sb = StringBuilder()
                     sb.Append "## Cached Context:" |> ignore
                     let rec go i =
@@ -1541,25 +1685,37 @@ Format:
             (Builtin.operators.Values |> List.ofSeq) @ (Builtin.commands.Values |> List.ofSeq)
         let inline addCommand (bot: AestasBot) (cmd: ICommand) =
             bot.Commands.Add(cmd.Name, cmd)
-        let inline addMappingContentCtorTip (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot->string) =
+        let inline addContentParser (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot -> string) =
             bot.MappingContentCtorTips.Add(name, (ctor, tip))
-        let inline addProtocolContentCtorTip (bot: AestasBot) (ctor: ProtocolSpecifyContentCtor, name: string, tip: AestasBot->string) =
+        let inline addProtocolContentCtorTip (bot: AestasBot) (ctor: ProtocolSpecifyContentCtor, name: string, tip: AestasBot -> string) =
             bot.ProtocolContentCtorTips.Add(name, (ctor, tip))
-        let inline addCommandRange (bot: AestasBot) (cmds: ICommand list) =
+        let inline updateExtraData (bot: AestasBot) (key: string) (value: obj) =
+            bot.ExtraData[key] <- value
+        let inline updateCommand (bot: AestasBot) (cmd: ICommand) =
+            if bot.Commands.ContainsKey cmd.Name then bot.Commands.[cmd.Name] <- cmd
+            else failwith $"Can only update existing item"
+        let inline updateContentParser (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot -> string) =
+            if bot.MappingContentCtorTips.ContainsKey name then bot.MappingContentCtorTips.[name] <- (ctor, tip)
+            else failwith $"Can only update existing item"
+        let inline addCommands (bot: AestasBot) (cmds: ICommand list) =
             cmds |> List.iter (addCommand bot)
-        let inline addMappingContentCtorTipRange (bot: AestasBot) ctorTips =
-            ctorTips |> List.iter (addMappingContentCtorTip bot)
-        let inline addProtocolContentCtorTipRange (bot: AestasBot) ctorTips =
+        let inline addContentParsers (bot: AestasBot) contentParsers =
+            contentParsers |> List.iter (addContentParser bot)
+        let inline addProtocolContentCtorTips (bot: AestasBot) ctorTips =
             ctorTips |> List.iter (addProtocolContentCtorTip bot)
         let inline addSystemInstruction (bot: AestasBot) systemInstruction =
             bot.SystemInstruction <- systemInstruction
         let inline addSystemInstructionBuilder (bot: AestasBot) systemInstructionBuilder =
             bot.SystemInstructionBuilder <- Some systemInstructionBuilder
+        let inline updateSystemInstruction (bot: AestasBot) systemInstruction =
+            bot.SystemInstruction <- systemInstruction
+        let inline updateSystemInstructionBuilder (bot: AestasBot) systemInstructionBuilder =
+            bot.SystemInstructionBuilder <- Some systemInstructionBuilder
         type BotParameter = {
             name: string
             model: ILanguageModelClient
             systemInstruction: string option
-            systemInstructionBuilder: SystemInstructionBuilder option
+            systemInstructionBuilder: PipeLineChain<AestasBot*StringBuilder> option
             contentLoadStrategy: BotContentLoadStrategy option
             contentParseStrategy: BotContentParseStrategy option
             messageReplyStrategy: BotMessageReplyStrategy option
@@ -1585,7 +1741,7 @@ Format:
             | Some x -> x |> List.iter (fun (uid, privilege) -> bot.CommandPrivilegeMap.Add(uid, privilege))
             | _ -> ()
             bot
-        let inline createBotSimple name model =
+        let inline createBotShort name model =
             let bot = AestasBot()
             bot.Name <- name
             bot.Model <- Some model

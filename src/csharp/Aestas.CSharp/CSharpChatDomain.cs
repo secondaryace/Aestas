@@ -8,7 +8,7 @@
             async Task<FSharpResult<Unit, string>> wrapper() 
             {
                 await SendAsync(message => value0.Invoke(message), value1.ToList());
-                return FSharpResult<Unit, string>.NewOk(null);
+                return FSharpResult<Unit, string>.NewOk(FSharpHelper.UnitValue);
             }
             return FSharpAsync.AwaitTask(wrapper());
         }

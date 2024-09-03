@@ -1,4 +1,5 @@
 global using System;
+global using static Aestas.Prim;
 global using static Aestas.Core;
 global using Microsoft.FSharp.Collections;
 global using Microsoft.FSharp.Control;

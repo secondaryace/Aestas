@@ -14,26 +14,26 @@ module Sticker =
     type StickerInfo = {path: string; width: int; height: int}
     type Strickers = {stickers: Dictionary<string, StickerInfo>}
     let cache = Dictionary<string, byte[]>()
-    type StickerContent(name: string) =
-        interface IAestasMappingContent with
-            member _.Convert bot domain = 
-                match bot.ExtraData("stickers") with
-                | Some (:? Strickers as profile) -> 
-                    let sticker = profile.stickers[name]
-                    if cache.ContainsKey sticker.path |> not then
-                        cache.Add(sticker.path, File.ReadAllBytes sticker.path)
-                    AestasImage(cache[sticker.path], $"image/{sticker.path.Split('.')[^0]}", sticker.width, sticker.height)
-                | _ -> AestasText("Error: No sticker profile found")
-        interface IAutoInit<(ContentParam->IAestasMappingContent)*string*(AestasBot -> string), unit> with
+    type StickerParser =
+        interface IAutoInit<string*MappingContentCtor*(AestasBot -> string), unit> with
             static member Init _ = 
-                (fun (domain, params', content) ->
-                    content |> StickerContent :> IAestasMappingContent), "sticker", (fun bot ->
-                        let sb = StringBuilder()
-                        sb.AppendLine("You may send stickers like #[sticker:name].") |> ignore
-                        sb.AppendLine("e.g. #[sticker:happy].") |> ignore
-                        match bot.ExtraData("stickers") with
-                        | Some (:? Strickers as stickers) -> 
-                            sb.AppendLine("Available stickers: ") |> ignore
-                            stickers.stickers |> Dict.iter (fun k v -> sb.Append(k).Append ' ' |> ignore)
-                        | _ -> ()
-                        sb.ToString())
+                "sticker"
+                , fun bot domain params' content ->
+                    match bot.TryGetExtraData("stickers") with
+                    | Some (:? Strickers as profile) when profile.stickers.ContainsKey content -> 
+                        let sticker = profile.stickers[content]
+                        if cache.ContainsKey sticker.path |> not then
+                            cache.Add(sticker.path, File.ReadAllBytes sticker.path)
+                        AestasImage(cache[sticker.path], $"image/{sticker.path.Split('.')[^0]}", sticker.width, sticker.height) |> Ok
+                    | Some (:? Strickers as _) -> Error $"Couldn't find sticker {content}"
+                    | _ -> Error "Couldn't find stickers data"
+                , fun bot ->
+                    let sb = StringBuilder()
+                    sb.AppendLine("You may send stickers like #[sticker:name].") |> ignore
+                    sb.AppendLine("e.g. #[sticker:happy].") |> ignore
+                    match bot.TryGetExtraData("stickers") with
+                    | Some (:? Strickers as stickers) -> 
+                        sb.AppendLine("Available stickers: ") |> ignore
+                        stickers.stickers |> Dict.iter (fun k v -> sb.Append(k).Append ' ' |> ignore)
+                    | _ -> ()
+                    sb.ToString()

@@ -89,7 +89,7 @@ module Gemini =
             | AestasImage(bs, mime, w, h) -> 
                 parts.Add <| InlineData {inline_data = {mime_type = mime; data = bs |> Convert.ToBase64String}}
             | AestasQuote mid ->
-                match contentsCache[domain] |> ArrList.tryFindBack (snd' >> ( = ) mid) with
+                match contentsCache[domain] |> ArrList.tryFindBack (snd' >> (=) mid) with
                 | Some msg -> 
                     parts.Add <| Text {text = "#[quote:" }
                     parts.AddRange (fst' msg).parts
@@ -138,7 +138,7 @@ module Gemini =
             member _.RemoveCache domain messageId =
                 match
                     contentsCache[domain] |>
-                    ArrList.tryFindIndexBack (fun x -> snd' x = messageId) 
+                    ArrList.tryFindIndexBack (snd' >> (=) messageId) 
                 with
                 | Some i -> contentsCache[domain].RemoveAt i
                 | None -> ()

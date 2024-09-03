@@ -70,21 +70,21 @@ module rec AestasLagrangeBot =
             match entities with
             | (:? MarketfaceEntity)::(:? TextEntity as t)::_ -> [AestasText $"#[sticker:{t.Text.Trim('[', ']')}]"]
             | _ -> entities |> List.map this.ParseLagrangeEntity
-        member this.ParseAestasContent (content: AestasContent): IMessageEntity =
+        member this.ParseAestasContent (content: AestasContent) =
             match content with
-            | AestasText t -> new TextEntity(t)
-            | AestasImage (bs, mime, w, h) -> new ImageEntity(bs)
-            | AestasAudio (bs, mime) -> new RecordEntity(bs)
-            | AestasVideo (bs, mime) -> new VideoEntity(bs)
+            | AestasText t -> new TextEntity(t) :> IMessageEntity |> Some
+            | AestasImage (bs, mime, w, h) -> new ImageEntity(bs) :> IMessageEntity |> Some
+            | AestasAudio (bs, mime) -> new RecordEntity(bs) :> IMessageEntity |> Some
+            | AestasVideo (bs, mime) -> new VideoEntity(bs) :> IMessageEntity |> Some
             | AestasMention m -> 
                 new MentionEntity("@"+(cachedMembers 
-                    |> Array.find (fun m' -> m'.uid = m.uid)).name, m.uid)
-            | AestasMappingContent c -> c.Convert this.Bot.Value this |> this.ParseAestasContent
-            | _ -> TextEntity "not supported"
+                    |> Array.find (fun m' -> m'.uid = m.uid)).name, m.uid) :> IMessageEntity |> Some
+            | AestasBlank -> None
+            | _ -> TextEntity "not supported" :> IMessageEntity |> Some
         member val MessageCacheQueue = List<(IMessageAdapter -> unit)*uint32>() with get, set
         override this.Send callback msgs = 
             async {
-                let msgs = msgs |> List.map this.ParseAestasContent
+                let msgs = msgs |> List.choose this.ParseAestasContent
                 let chain = (if private' then MessageBuilder.Friend(gid) else MessageBuilder.Group(gid)).Build()
                 // todo
                 chain.AddRange msgs

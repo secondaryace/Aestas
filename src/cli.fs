@@ -10,7 +10,7 @@ open Aestas.Plugins.MsBing
 module Cli =
     [<EntryPoint>]
     let main(args) =
-        AutoInit.init()
+        AutoInit.initAll()
         Console.CursorVisible <- false
         logInfo[0] "Console Started"
         logTrace[0] "Test0"

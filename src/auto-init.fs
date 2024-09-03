@@ -49,12 +49,21 @@ module AutoInit =
         if commands.ContainsKey typeof<'t> then commands[typeof<'t>] else failwith $"Command {toString typeof<'t>} not found"
     let inline getProtocol<'t when 't :> IProtocolAdapter> () =
         if protocols.ContainsKey typeof<'t> then protocols[typeof<'t>] else failwith $"Protocol {toString typeof<'t>} not found"
-    let inline getMappingContentCtorTip<'t when 't :> IAestasMappingContent> () =
-        if mappingContentCtorTips.ContainsKey typeof<'t> then mappingContentCtorTips[typeof<'t>] else failwith $"MappingContentCtor {toString typeof<'t>} not found"
+    let inline getContentParser<'t when 't :> IAutoInit<string*MappingContentCtor*(AestasBot -> string), unit>> () =
+        if mappingContentCtorTips.ContainsKey typeof<'t> then mappingContentCtorTips[typeof<'t>] else failwith $"ContentParser {toString typeof<'t>} not found"
     let inline getProtocolContentCtorTip<'t when 't :> IProtocolSpecifyContent> () =
         if protocolContentCtorTips.ContainsKey typeof<'t> then protocolContentCtorTips[typeof<'t>] else failwith $"ProtocolContentCtor {toString typeof<'t>} not found"
-    let init () =
+    type InitTypes =
+        | Ignore = 101
+        | Bot = 100
+        | Protocol = 0
+        | ProtocolPlugin = 1
+        | ContentParser = 2
+        | Command = 3
+    let mutable _initializers: (InitTypes * (unit -> unit)) array option = None
+    let _init (initTypes: Set<InitTypes>) =
         logInfo["AutoInit"] "Initializing"
+        if Set.contains InitTypes.Ignore initTypes then failwith "Ignore is not allowed in initTypes"
         if Directory.Exists "extensions" then
             Directory.GetFiles "extensions"
             |> Array.filter (fun x -> x.EndsWith ".dll")
@@ -76,71 +85,45 @@ module AutoInit =
         |> Array.map (fun (i, t') ->
             match i.GenericTypeArguments with
             | [|t; targ|] when t = typeof<AestasBot> && targ = typeof<unit> -> 
-                100, fun () ->
+                InitTypes.Bot, fun () ->
                     let bot = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized bot {(bot: AestasBot).Name}"
                     _bots.Add bot
-            | [|t; targ|] when t = typeof<(ContentParam->IProtocolSpecifyContent)*string*(AestasBot->string)> && targ = typeof<unit> -> 
-                1, fun () ->
-                    let ctor, contentType, tip = invokeInit t' ()
+            | [|t; targ|] when t = typeof<string*ProtocolSpecifyContentCtor*(AestasBot -> string)> && targ = typeof<unit> -> 
+                InitTypes.ProtocolPlugin, fun () ->
+                    let name, ctor, tip = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized content plugin {toString t'}"
-                    _protocolContentCtorTips.Add(t', (ctor, contentType, tip))
-            | [|t; targ|] when t = typeof<(ContentParam->IAestasMappingContent)*string*(AestasBot->string)> && targ = typeof<unit> -> 
-                1, fun () ->
-                    let ctor, contentType, tip = invokeInit t' ()
+                    _protocolContentCtorTips.Add(t', (ctor, name, tip))
+            | [|t; targ|] when t = typeof<string*MappingContentCtor*(AestasBot -> string)> && targ = typeof<unit> -> 
+                InitTypes.ContentParser, fun () ->
+                    let name, ctor, tip = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized content plugin {toString t'}"
-                    _mappingContentCtorTips.Add(t', (ctor, contentType, tip))
+                    _mappingContentCtorTips.Add(t', (ctor, name, tip))
             | [|t; targ|] when t = typeof<IProtocolAdapter> && targ = typeof<unit> -> 
-                0, fun () ->
+                InitTypes.Protocol, fun () ->
                     let protocol = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized protocol {toString t'}"
                     _protocols.Add(t', protocol)
             | [|t; targ|] when t = typeof<ICommand> && targ = typeof<unit> -> 
-                2, fun () ->
+                InitTypes.Command, fun () ->
                     let cmd = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized command {toString t'}"
                     _commands.Add(t', cmd)
-            | _ -> 101, ignore)
+            | _ -> InitTypes.Ignore, ignore)
         |> Array.sortBy fst
-        |> Array.iter (fun (p, f) -> if p <> 101 then try f() with ex -> logError["AutoInit"] $"Error initializing {ex}")
-        // if types.ContainsKey "protocol" then 
-        //     types["protocol"] 
-        //     |> Array.iter (fun (_, i, x, t, targ) -> 
-        //         try
-        //         let p = x.GetInterfaceMap(typeof<IAutoInit<IProtocolAdapter, unit>>).TargetMethods[0].Invoke(null, [|null|]) :?> IProtocolAdapter
-        //         protocols.Add(t, p)
-        //         logInfo["AutoInit"] $"Initialized protocol {p.GetType().Name}"
-        //         with ex -> logError["AutoInit"] $"Error initializing protocol {toString x} {ex}")
-        // if types.ContainsKey "pluginAny" then
-        //     types["pluginAny"]
-        //     |> Array.iter (fun x -> 
-        //         try
-        //         let ctor, name, tip = x.GetInterfaceMap(typeof<IAutoInit<(ContentParam->IAestasMappingContent)*string*string, unit>>).TargetMethods[0].Invoke(null, [|null|]) :?> (ContentParam->IAestasMappingContent)*string*string
-        //         mappingContentCtors.Add(name, (ctor, tip))
-        //         logInfo["AutoInit"] $"Initialized mappingContentCto with name {name}"
-        //         with ex -> logError["AutoInit"] $"Error initializing mappingContentCto {toString x} {ex}") 
-        // if types.ContainsKey "protocolExt" then
-        //     types["protocolExt"]
-        //     |> Array.iter (fun x -> 
-        //         try
-        //         let ctor, name, tip = x.GetInterfaceMap(typeof<IAutoInit<(ContentParam->IProtocolSpecifyContent)*string*string, unit>>).TargetMethods[0].Invoke(null, [|null|]) :?> (ContentParam->IProtocolSpecifyContent)*string*string
-        //         protocolContentCtors.Add(name, (ctor, tip))
-        //         logInfo["AutoInit"] $"Initialized protocolContentCtor with name {name}"
-        //         with ex -> logError["AutoInit"] $"Error initializing protocolContentCtor {toString x} {ex}")
-        // if types.ContainsKey "command" then
-        //     types["command"]
-        //     |> Array.iter (fun x -> 
-        //         try
-        //         let cmd = x.GetInterfaceMap(typeof<IAutoInit<ICommand, unit>>).TargetMethods[0].Invoke(null, [|null|]) :?> ICommand
-        //         commands.Add(cmd.Name, cmd)
-        //         logInfo["AutoInit"] $"Initialized command {cmd.Name}"
-        //         with ex -> logError["AutoInit"] $"Error initializing command {toString x} {ex}")
-        // if types.ContainsKey "bot" then
-        //     types["bot"] 
-        //     |> Array.iter (fun x -> 
-        //         try
-        //         let bot = x.GetInterfaceMap(typeof<IAutoInit<AestasBot, unit>>).TargetMethods[0].Invoke(null, [|null|]) :?> AestasBot
-        //         bots.Add(bot)
-        //         logInfo["AutoInit"] $"Initialized bot {bot.Name}"
-        //         with ex -> logError["AutoInit"] $"Error initializing bot {toString x} {ex}")
+        |> Array.iter (fun (p, f) -> if p <> InitTypes.Ignore && Set.contains p initTypes then try f() with ex -> logError["AutoInit"] $"Error initializing {ex}")
         logInfo["AutoInit"] "Initialized"
+    let init force (initTypes: Set<InitTypes>) =
+        match force, _initializers with
+        | true, _ -> 
+            _bots.Clear()
+            _protocols.Clear()
+            _commands.Clear()
+            _mappingContentCtorTips.Clear()
+            _protocolContentCtorTips.Clear()
+            _init initTypes
+        | _, None -> _init initTypes
+        | _ -> ()
+    let initAll () = 
+        seq {InitTypes.Bot; InitTypes.Protocol; InitTypes.ProtocolPlugin; InitTypes.ContentParser; InitTypes.Command}
+        |> Set.ofSeq |> init true

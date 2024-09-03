@@ -11,7 +11,7 @@ type RegenerateCommand() =
         member this.Execute env args =
             match
                 env.domain.Messages
-                |> IListExt.tryFindBack (fun x -> x.SenderId = env.domain.Self.uid)
+                |> IList.tryFindBack (fun x -> x.SenderId = env.domain.Self.uid)
             with
             | None -> env.log "No message to regenerate"
             | Some msg ->

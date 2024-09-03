@@ -16,5 +16,6 @@ extensions/Aestas.Test.CSharp/obj/*
 extensions/Debug/*
 extensions/Release/*
 fable/*
-
+src/tests/interactive/privateVar.fsx
+src/tests/interactive/privateVar.csx
 aestas.fsproj
