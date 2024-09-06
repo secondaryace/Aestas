@@ -4,20 +4,23 @@
 一切使用F#代码配置，无需编写JSON或YAML。
 ## **构建**
 ```bash
-aestas build
+./aestas.sh build
+```
+```pwsh
+.\aestas.ps1 build
 ```
 ## **模块**
 | 类型 | 文件 | .NET 类型 |
 | --- | --- | --- |
-| Core | src/core.fs | ```Aestas.Core.AestasCore``` |
-| Auto Initializer | src/auto-init.fs | ```Aestas.AutoInit``` |
-| Protocol | src/adapters/ | ```Aestas.Core.IProtocolAdapter``` |
+| 核心 | src/core.fs | ```Aestas.Core.AestasCore``` |
+| 自动初始化 | src/auto-init.fs | ```Aestas.AutoInit``` |
+| 协议 | src/adapters/ | ```Aestas.Core.IProtocolAdapter``` |
 | Bot | src/bots/ | ```Aestas.Core.AestasBot``` |
-| Command | src/commands/ | ```Aestas.Core.ICommand``` |
-| Plugin | src/plugins/ | ```Aestas.Core.IAestasMappingContent``` |
-| Plugin | src/plugins/ | ```Aestas.Core.IProtocolSpecifyContent```|
-| LLM | src/llms/ | ```Aestas.Core.ILanguageModelClient``` |
+| 命令 | src/commands/ | ```Aestas.Core.ICommand``` |
+| 内容解析器 | src/plugins/ | ```Aestas.AutoInit.IAutoInit<string*MappingContentCtor*SystemInstructionBuilder, unit>``` |
+| 语言模型 | src/llms/ | ```Aestas.Core.ILanguageModelClient``` |
 ## **内置支持**
 - [x] 控制台
-- [x] QQ（通过Language）
+- [x] QQ（通过Lagrange）
 - [ ] Satori 
+- [ ] WebUI (5%)

@@ -15,7 +15,7 @@ module Sticker =
     type Strickers = {stickers: Dictionary<string, StickerInfo>}
     let cache = Dictionary<string, byte[]>()
     type StickerParser =
-        interface IAutoInit<string*MappingContentCtor*(AestasBot -> string), unit> with
+        interface IAutoInit<string*MappingContentCtor*(AestasBot -> StringBuilder -> unit), unit> with
             static member Init _ = 
                 "sticker"
                 , fun bot domain params' content ->
@@ -27,8 +27,7 @@ module Sticker =
                         AestasImage(cache[sticker.path], $"image/{sticker.path.Split('.')[^0]}", sticker.width, sticker.height) |> Ok
                     | Some (:? Strickers as _) -> Error $"Couldn't find sticker {content}"
                     | _ -> Error "Couldn't find stickers data"
-                , fun bot ->
-                    let sb = StringBuilder()
+                , fun bot sb ->
                     sb.AppendLine("You may send stickers like #[sticker:name].") |> ignore
                     sb.AppendLine("e.g. #[sticker:happy].") |> ignore
                     match bot.TryGetExtraData("stickers") with
@@ -36,4 +35,3 @@ module Sticker =
                         sb.AppendLine("Available stickers: ") |> ignore
                         stickers.stickers |> Dict.iter (fun k v -> sb.Append(k).Append ' ' |> ignore)
                     | _ -> ()
-                    sb.ToString()

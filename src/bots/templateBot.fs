@@ -48,7 +48,7 @@ Your system instruction here
                     name = "Template"// modify there to your bot's name
                     model = model
                     systemInstruction = systemInstruction |> Some
-                    systemInstructionBuilder = Builtin.buildSystemInstruction |> Some
+                    systemInstructionBuilder = Builtin.buildSystemInstruction |> PipeLineChain |> Some
                     contentLoadStrategy = StrategyLoadOnlyMentionedOrPrivate |> Some
                     contentParseStrategy = None
                     messageReplyStrategy = StrategyReplyOnlyMentionedOrPrivate |> Some
@@ -60,12 +60,18 @@ Your system instruction here
                         0u, CommandPrivilege.High
                     ] |> Some
                 }
-            getProtocol<LagrangeAdapter>().InitDomainView(bot, 0u(* QQ *)) |> bindDomain bot
+            // bind to QQ 
+            //getProtocol<LagrangeAdapter>().InitDomainView bot 0u(* QQ *) |> bindDomain bot
+            // bind to Console
             ConsoleBot.singleton.InitDomainView(bot, 0u) |> bindDomain bot
+            // try to bind to WebUI
+            tryGetProtocol "WebUIAdapter" 
+            |> Option.map (fun p -> p.InitDomainView bot 2u |> bindDomain bot)
+            |> ignore
             // primary commands, like lsdomain, version, etc.
-            getPrimaryCommands() |> addCommandRange bot
+            getPrimaryCommands() |> addCommands bot
             // these commands could be removed
-            addCommandRange bot [
+            addCommands bot [
                 getCommand<InfoCommand>()
                 getCommand<RegenerateCommand>()
                 getCommand<TodaysDietCommand>()
@@ -73,23 +79,26 @@ Your system instruction here
                 getCommand<GuessWordCommand>()
             ]
             // these plugins could be removed
-            addMappingContentCtorTipRange bot [
-                getMappingContentCtorTip<MsTtsContent>()
-                getMappingContentCtorTip<MsBingContent>()
-                getMappingContentCtorTip<StickerContent>()
+            addContentParsers bot [
+                getContentParser<MsTtsParser>()
+                getContentParser<MsBingFunction>()
+                getContentParser<StickerParser>()
             ]
             // these files don't exist, just examples
-            addExtraData bot "stickers" {
-                stickers = dict' [
-                    "欸嘿", {path = "media/stickers/chuckle.png"; width = 328; height = 322}
-                    "呜呜呜", {path = "media/stickers/cry.png"; width = 328; height = 322}
-                ]
-            }
+            // replace stickers with your own stickers
+
+            // addExtraData bot "stickers" {
+            //     stickers = dict' [
+            //         "欸嘿", {path = "media/stickers/chuckle.png"; width = 328; height = 322}
+            //         "呜呜呜", {path = "media/stickers/cry.png"; width = 328; height = 322}
+            //     ]
+            // }
             addExtraData bot "mstts" {
                 subscriptionKey = "Your subscription key here"
                 subscriptionRegion = "Your subscription region here"
                 voiceName = "zh-CN-XiaoyiNeural"
                 outputFormat = "ogg-24khz-16bit-mono-opus"
+                styles = []
                 }
             addExtraData bot "msbing" {
                 subscriptionKey = "Your subscription key here"

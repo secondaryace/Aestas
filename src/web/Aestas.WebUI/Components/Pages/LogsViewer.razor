@@ -1,0 +1,40 @@
+﻿@page "/logs"
+
+<PageTitle>Logs</PageTitle>
+
+<FluentTabs @bind-ActiveTabId="@activeid" OnTabChange="HandleOnTabChange">
+    @foreach (var (owner, index) in Logger.getLoggerOwners().Select((o, i) => (o, i)))
+    {
+        <FluentTab Label="@toString(owner)" Id="@TabId(index)">
+            <Content>
+                @foreach (var log in Logger.getLogs(owner).ToArray())
+                {
+                    <FluentLabel Typo="Typography.Subject"><code>@log.Print()</code></FluentLabel>
+                }
+            </Content>
+        </FluentTab>
+    }
+</FluentTabs>
+
+@code {
+    string? activeid = "tab-0";
+    FluentTab? changedto;
+    private string TabId(int i) => $"tab-{i}";
+    private void HandleOnTabChange(FluentTab tab)
+    {
+        changedto = tab;
+    }
+    private Color LevelToColor(Logger.LogLevel level)
+    {
+        return level switch
+        {
+            Logger.LogLevel.Trace => Color.Disabled,
+            Logger.LogLevel.Debug => Color.Info,
+            Logger.LogLevel.Info => Color.Neutral,
+            Logger.LogLevel.Warn => Color.Warning,
+            Logger.LogLevel.Error => Color.Error,
+            Logger.LogLevel.Fatal => Color.Error,
+            _ => Color.Neutral
+        };
+    }
+}

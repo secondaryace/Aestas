@@ -37,7 +37,7 @@ module MsBing =
         else
             Error response.ReasonPhrase
     type MsBingFunction =
-        interface IAutoInit<string*MappingContentCtor*(AestasBot -> string), unit> with
+        interface IAutoInit<string*MappingContentCtor*SystemInstructionBuilder, unit> with
             static member Init _ = 
                 "bing"
                 , fun bot domain params' content ->
@@ -57,8 +57,8 @@ module MsBing =
                             Ok AestasBlank
                         | Error emsg -> Error emsg
                     | _ -> Error "Couldn't find msbing data"
-                , fun _ ->
-                """You may use bing web search by using format like #[bing:search string].
+                , fun bot builder ->
+                    """You may use bing web search by using format like #[bing:search string].
 Then this function will return a list of search results.
-e.g. #[bing: weather of ShenZhen]"""
+e.g. #[bing: weather of ShenZhen]""" |> builder.Append |> ignore
             

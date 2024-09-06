@@ -1,0 +1,136 @@
+﻿@page "/chat/{botName}"
+@implements IDisposable
+
+<PageTitle>Chat</PageTitle>
+
+<FluentStack Orientation="Orientation.Horizontal" >
+    <div style="display: flex; padding: 5px;">
+        <FluentNavMenu Width="250" Title="Custom navigation menu">
+            @foreach (var domain in WebUI.Singleton.domains)
+            {
+                <FluentNavLink Href="@GetNameEndpoint(domain.Key.Name)">@domain.Key.Name</FluentNavLink>
+            }
+        </FluentNavMenu>
+    </div>
+    <FluentDivider Style="height: 100%;" Role="DividerRole.Presentation" Orientation="Orientation.Vertical"></FluentDivider>
+    @if (Domain is VirtualDomain domain)
+    {
+        <FluentStack Orientation="Orientation.Vertical">
+            <div style="width: 100%; height: calc(100dvh - 160px); overflow-y: auto;">
+                <FluentStack Orientation="Orientation.Vertical">
+                    @foreach (var content in Context[domain])
+                    {
+                        <FluentCard>
+                            <FluentLabel Typo="Typography.H5">@content.Item1:</FluentLabel>
+                            <br/>
+                            @foreach (var c in content.Item3)
+                            {
+                                switch(c)
+                                {
+                                    case AestasContent.AestasText t:
+                                        <div>
+                                            @GetMarkupString(t.Item)
+                                        </div>
+                                        break;
+                                    case AestasContent.AestasImage i:
+                                        <img src="data:image; base64, @System.Convert.ToBase64String(i.Item1)" />
+                                        break;
+                                    case AestasContent.AestasAudio a:
+                                        <audio controls>
+                                            <source src="data:@a.Item2; base64, @System.Convert.ToBase64String(a.Item1)" type="@a.Item2">
+                                        </audio>
+                                        break;
+                                }
+                            }
+                        </FluentCard>
+                    }
+                </FluentStack>
+            </div>
+            <FluentStack Orientation="Orientation.Horizontal" >
+                <FluentTextArea @bind-Value=@InputBoxValue Placeholder="Input..." Style="width: 100%; height: 40px" />
+                <FluentButton 
+                    IconStart="@(new Icons.Regular.Size16.Send())"
+                    Style="height: 40px"
+                    Loading="@processing"
+                    OnClick="@GetReplyFromDomain"
+                    Disabled="@String.IsNullOrEmpty(InputBoxValue)">
+                    Send
+                </FluentButton>
+            </FluentStack>
+        </FluentStack>
+    }
+    else
+    {
+        <div style="width: 100%; height: calc(100dvh - 100px); ">
+            <FluentLabel Alignment="HorizontalAlignment.Center" Typo="Typography.Subject">Select a bot to chat</FluentLabel>
+        </div>
+    }
+</FluentStack>
+
+@code
+{
+    private MarkdownPipeline mdPipe = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+    private bool callbackInit = false;
+    private bool processing = false;
+    [Parameter]
+    public string? BotName { get; set; }
+    public VirtualDomain? Domain
+    {
+        get
+        {
+            if (BotName is string name && WebUI.Singleton.domains.FirstOrDefault(p => p.Key.Name == name) is KeyValuePair<AestasBot, VirtualDomain> t)
+            {
+                return t.Value;
+            }
+            return null;
+        }
+    }
+    public string GetNameEndpoint(string s) => $"/chat/{s}";
+    public MarkupString GetMarkupString(string s) => (MarkupString)Markdown.ToHtml(s, mdPipe);
+    public string? InputBoxValue {get; set;}
+    private Dictionary<VirtualDomain, List<(string, ulong, AestasContent[])>> _context = new();
+    private Dictionary<VirtualDomain, List<(string, ulong, AestasContent[])>> Context
+    {
+        get
+        {
+            if (Domain is VirtualDomain domain && !_context.ContainsKey(domain))
+            {
+                _context[domain] = new();
+            }
+            return _context;
+        }
+    }
+    public async void GetReplyFromDomain()
+    {
+        if (Domain is VirtualDomain domain && InputBoxValue is string v)
+        {
+            processing = true;
+            if (!callbackInit)
+            {
+                callbackInit = true;
+                WebUI.Singleton.sendCallback[domain.Bot.Value] += SendCallBack;
+            }
+            AestasContent[] contents = [AestasContent.NewAestasText(v)];
+            var c = Context[Domain].Count;
+            Context[Domain].Add(("User", 0, contents));
+            InvokeAsync(StateHasChanged);
+            var mid = await WebUI.Singleton.SendMessage(domain, contents);
+            Context[Domain][c] = ("User", mid, contents);
+            processing = false;
+            InputBoxValue = "";
+        }
+    }
+    public void SendCallBack(ulong mid, AestasContent[] contents)
+    {
+        Context[Domain].Add((Domain.Self.name, mid, contents));
+        InvokeAsync(StateHasChanged);
+    }
+    public void Dispose()
+    {
+        if (callbackInit && Domain is VirtualDomain domain)
+        {
+            callbackInit = false;
+            WebUI.Singleton.sendCallback[domain.Bot.Value] -= SendCallBack;
+        }
+    }
+}

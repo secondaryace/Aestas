@@ -1,5 +1,6 @@
 namespace Aestas
 open System
+open System.Text
 open System.IO
 open System.Collections.Generic
 open System.Reflection
@@ -19,37 +20,37 @@ module AutoInit =
         static abstract member Init: 'tArg -> 't
     let private _protocols = Dictionary<Type, IProtocolAdapter>()
     let private _bots = arrList<AestasBot>()
-    let private _mappingContentCtorTips = Dictionary<Type, MappingContentCtor*string*(AestasBot->string)>()
+    let private _mappingContentCtorTips = Dictionary<Type, MappingContentCtor*string*(AestasBot -> StringBuilder -> unit)>()
     let private _protocolContentCtorTips = Dictionary<Type, ProtocolSpecifyContentCtor*string*(AestasBot->string)>()
     let private _commands = Dictionary<Type, ICommand>()
     let bots = _bots :> IReadOnlyList<AestasBot>
     let protocols = _protocols :> IReadOnlyDictionary<Type, IProtocolAdapter>
-    let mappingContentCtorTips = _mappingContentCtorTips :> IReadOnlyDictionary<Type, MappingContentCtor*string*(AestasBot->string)>
+    let mappingContentCtorTips = _mappingContentCtorTips :> IReadOnlyDictionary<Type, MappingContentCtor*string*(AestasBot -> StringBuilder -> unit)>
     let protocolContentCtorTips = _protocolContentCtorTips :> IReadOnlyDictionary<Type, ProtocolSpecifyContentCtor*string*(AestasBot->string)>
     let commands = _commands :> IReadOnlyDictionary<Type, ICommand>
     let inline invokeInit<'t, 'tArg> (t: Type) (arg: 'tArg) =
         t.GetInterfaceMap(typeof<IAutoInit<'t, 'tArg>>).TargetMethods[0].Invoke(null, [|arg|]) :?> 't
     let inline tryGetCommand s =
         match commands |> Dict.tryFind (fun k v -> k.Name = s) with
-        | Some v -> Some v
+        | Some (k, v) -> Some v
         | None -> None
     let inline tryGetProtocol s =
-        match protocols |> Dict.tryFind (fun k v -> k.GetType().Name = s) with
-        | Some v -> Some v
+        match protocols |> Dict.tryFind (fun k v -> k.Name = s) with
+        | Some (k, v) -> Some v
         | None -> None
     let inline tryGetMappingContentCtorTip s =
         match mappingContentCtorTips |> Dict.tryFind (fun k v -> k.Name = s) with
-        | Some v -> Some v
+        | Some (k, v) -> Some v
         | None -> None
     let inline tryGetProtocolContentCtorTip s =
         match protocolContentCtorTips |> Dict.tryFind (fun k v -> k.Name = s) with
-        | Some v -> Some v
+        | Some (k, v) -> Some v
         | None -> None
     let inline getCommand<'t when 't :> ICommand> () = 
         if commands.ContainsKey typeof<'t> then commands[typeof<'t>] else failwith $"Command {toString typeof<'t>} not found"
     let inline getProtocol<'t when 't :> IProtocolAdapter> () =
         if protocols.ContainsKey typeof<'t> then protocols[typeof<'t>] else failwith $"Protocol {toString typeof<'t>} not found"
-    let inline getContentParser<'t when 't :> IAutoInit<string*MappingContentCtor*(AestasBot -> string), unit>> () =
+    let inline getContentParser<'t when 't :> IAutoInit<string*MappingContentCtor*(AestasBot -> StringBuilder -> unit), unit>> () =
         if mappingContentCtorTips.ContainsKey typeof<'t> then mappingContentCtorTips[typeof<'t>] else failwith $"ContentParser {toString typeof<'t>} not found"
     let inline getProtocolContentCtorTip<'t when 't :> IProtocolSpecifyContent> () =
         if protocolContentCtorTips.ContainsKey typeof<'t> then protocolContentCtorTips[typeof<'t>] else failwith $"ProtocolContentCtor {toString typeof<'t>} not found"
@@ -72,7 +73,7 @@ module AutoInit =
                 Path.Combine(Environment.CurrentDirectory, x) |> Assembly.LoadFile |> ignore
                 logInfo["AutoInit"] $"Loaded assembly {x}"
                 with ex -> logError["AutoInit"] $"Error loading assembly {x}, {ex}")
-        Builtin.commands |> Dict.iter (fun k v -> _commands.Add(v.GetType(), v))
+        if initTypes |> Set.contains InitTypes.Command then Builtin.commands |> Dict.iter (fun k v -> _commands.TryAdd(v.GetType(), v) |> ignore)
         logInfo["AutoInit"] $"""Imported builtin commands: {_commands.Keys |> Seq.map (fun x -> x.Name) |> String.concat ", "}"""
         AppDomain.CurrentDomain.GetAssemblies()
         |> Array.collect (fun a -> a.GetTypes())
@@ -93,22 +94,22 @@ module AutoInit =
                 InitTypes.ProtocolPlugin, fun () ->
                     let name, ctor, tip = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized content plugin {toString t'}"
-                    _protocolContentCtorTips.Add(t', (ctor, name, tip))
-            | [|t; targ|] when t = typeof<string*MappingContentCtor*(AestasBot -> string)> && targ = typeof<unit> -> 
+                    _protocolContentCtorTips.TryAdd(t', (ctor, name, tip)) |> ignore
+            | [|t; targ|] when t = typeof<string*MappingContentCtor*(AestasBot -> StringBuilder -> unit)> && targ = typeof<unit> -> 
                 InitTypes.ContentParser, fun () ->
                     let name, ctor, tip = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized content plugin {toString t'}"
-                    _mappingContentCtorTips.Add(t', (ctor, name, tip))
+                    _mappingContentCtorTips.Add(t', (ctor, name, tip)) |> ignore
             | [|t; targ|] when t = typeof<IProtocolAdapter> && targ = typeof<unit> -> 
                 InitTypes.Protocol, fun () ->
                     let protocol = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized protocol {toString t'}"
-                    _protocols.Add(t', protocol)
+                    _protocols.Add(t', protocol) |> ignore
             | [|t; targ|] when t = typeof<ICommand> && targ = typeof<unit> -> 
                 InitTypes.Command, fun () ->
                     let cmd = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized command {toString t'}"
-                    _commands.Add(t', cmd)
+                    _commands.Add(t', cmd) |> ignore
             | _ -> InitTypes.Ignore, ignore)
         |> Array.sortBy fst
         |> Array.iter (fun (p, f) -> if p <> InitTypes.Ignore && Set.contains p initTypes then try f() with ex -> logError["AutoInit"] $"Error initializing {ex}")

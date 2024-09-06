@@ -75,7 +75,7 @@ module rec Core =
         abstract member MessageId: uint64 with get
         abstract member SenderId: uint32 with get
         abstract member Parse: unit -> AestasMessage
-        abstract member Mention: uint32 -> bool 
+        abstract member Mention: targetMemberId: uint32 -> bool 
         abstract member Command: string option with get
         abstract member Collection: IMessageAdapterCollection with get
         abstract member Preview: string with get
@@ -92,7 +92,7 @@ module rec Core =
         abstract member Run: unit -> Async<unit>
         /// return: name * domainId * isPrivate
         abstract member FetchDomains: unit -> struct(string*uint32*bool)[]
-        abstract member InitDomainView: AestasBot*uint32 -> AestasChatDomain
+        abstract member InitDomainView: bot: AestasBot -> domainId: uint32 -> AestasChatDomain
     // Use abstract class rather than interface to provide default implementation
     [<AbstractClass>]
     type AestasChatDomain() =
@@ -103,10 +103,15 @@ module rec Core =
         abstract member Virtual: AestasChatMember with get
         abstract member Members: AestasChatMember[] with get
         abstract member Bot: AestasBot option with get, set
-        abstract member Send: (IMessageAdapter -> unit) -> AestasContent list -> Async<Result<unit, string>>
-        abstract member Recall: uint64 -> Async<bool>
+        abstract member Send: callback: (IMessageAdapter -> unit) -> contents: AestasContent list -> Async<Result<unit, string>>
+        abstract member SendFile: data: byte[] -> Async<Result<unit, string>>
+        abstract member Recall: messageId: uint64 -> Async<bool>
         abstract member Name: string with get
         abstract member OnReceiveMessage: IMessageAdapter -> Async<Result<unit, string>>
+        default this.SendFile data =
+            async {
+                return Error "Not implemented"
+            }
         default this.OnReceiveMessage msg = 
             async {
                 match this.Bot with
@@ -127,6 +132,10 @@ module rec Core =
                         //     rmsg.Parse() |> callback
                         //     return Ok msg
 
+            }
+        default this.Recall messageId =
+            async {
+                return false
             }
     type AestasChatDomains = Dictionary<uint32, AestasChatDomain>
     type BotContentLoadStrategy =
@@ -211,7 +220,7 @@ module rec Core =
     type OverridePluginFunc = AestasContent ContentCtor
     type MappingContentCtor = Result<AestasContent, string> ContentCtor
     type ProtocolSpecifyContentCtor = Result<IProtocolSpecifyContent, string> ContentCtor
-    type SystemInstructionBuilder = AestasBot -> string -> string
+    type SystemInstructionBuilder = AestasBot -> StringBuilder -> unit
     type PrefixBuilder = AestasBot -> AestasMessage -> AestasMessage
     /// Bot class used in Aestas Core
     /// Create this directly
@@ -235,10 +244,12 @@ module rec Core =
         member val ContextStrategy = StrategyContextReserveAll with get, set
         member val Commands: Dictionary<string, ICommand> = Dictionary() with get
         member val CommandPrivilegeMap: Dictionary<uint32, CommandPrivilege> = Dictionary() with get
-        member val MappingContentCtorTips: Dictionary<string, struct(MappingContentCtor*(AestasBot->string))> = Dictionary() with get
+        member val MappingContentCtorTips: Dictionary<string, struct(MappingContentCtor*(AestasBot -> StringBuilder -> unit))> = Dictionary() with get
         member val ProtocolContentCtorTips: Dictionary<string, struct(ProtocolSpecifyContentCtor*(AestasBot->string))> = Dictionary() with get
         member val SystemInstructionBuilder: PipeLineChain<AestasBot*StringBuilder> option = None with get, set
         member val PrefixBuilder: PrefixBuilder option = None with get, set
+        member val SubBots: Dictionary<obj, AestasBot> = Dictionary() with get
+        member val SubBotDistributer: (IMessageAdapter option -> AestasChatDomain -> obj) option = None with get, set
         member _.TryGetExtraData
             with get key =
                 if extraData.ContainsKey key then Some extraData[key] else None
@@ -514,8 +525,8 @@ Format:
         override val Bot = None with get, set
         override _.Send callback contents =
             async {
-                send contents
                 UnitMessageAdapter({sender = bot; content = contents; mid = mid}, messages) |> callback
+                send mid contents
                 mid <- mid + 1UL
                 return Ok ()
             }
@@ -529,9 +540,13 @@ Format:
                     return true
             }
         member this.Input contents =
-            let message = {sender = user; content = contents; mid = mid}
-            mid <- mid + 1UL
-            UnitMessageAdapter(message, messages) |> this.OnReceiveMessage
+            async {
+                let message = {sender = user; content = contents; mid = mid}
+                mid <- mid + 1UL
+                match! UnitMessageAdapter(message, messages) |> this.OnReceiveMessage with
+                | Ok () -> return Ok (), mid - 1UL
+                | Error e -> return Error e, mid - 1UL
+            }
     type UnitClient() =
         interface ILanguageModelClient with
             member _.GetReply bot domain  = 
@@ -913,7 +928,7 @@ Format:
                 member this.Init() = this.Init()
                 member this.Run() = this.Run()
                 member this.FetchDomains() = this.FetchDomains()
-                member this.InitDomainView(bot, domainId) = this.InitDomainView(bot, domainId)
+                member this.InitDomainView bot domainId = this.InitDomainView(bot, domainId)
         let singleton = ConsoleChat()
     module Command =
         module Lexer =
@@ -1275,6 +1290,7 @@ Format:
             | Atom x -> x
         let LanguagePack = Lexer.makeLanguagePack keywords symbols newLine
         let excecute (env: CommandEnvironment) (cmd: string) =
+            try
             let tokens = Lexer.scanWithoutMacro LanguagePack cmd
             let ast, _, errors = Parser.parse tokens []
             Logger.logInfo[0] <| sprintf "%A, %A, %A" tokens ast errors
@@ -1284,6 +1300,7 @@ Format:
                 | Unit -> ()
                 | x -> env.log <| x.ToString()
             | _ -> env.log <| String.Join("\n", "Error occured:"::errors)
+            with ex -> env.log <| ex.ToString()
     module CommandHelper =
         /// Use this type to tell the parser how to parse the arguments
         type CommandParameters =
@@ -1478,8 +1495,12 @@ Format:
             sb.Append "## 1.About yourself\n" |> ignore
             sb.Append prompt |> ignore
             sb.Append "## 2.Some functions for you\n" |> ignore
-            overridePrimTip |> List.iter (fun (name, tips) -> sb.Append $"**{name}**:\n{tips}\n" |> ignore)
-            bot.MappingContentCtorTips |> Dict.iter (fun name struct(ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
+            overridePrimTip |> List.iter (fun (name, tips) -> 
+                sb.Append("**").Append(name).AppendLine("**:").AppendLine(tips) |> ignore)
+            bot.MappingContentCtorTips |> Dict.iter (fun name struct(ctor, tipBuilder) -> 
+                sb.Append("**").Append(name).AppendLine("**:") |> ignore
+                tipBuilder bot sb
+                sb.AppendLine("") |> ignore)
             bot.ProtocolContentCtorTips |> Dict.iter (fun name struct(ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
             bot, sb
         let buildPrefix (bot: AestasBot) (msg: AestasMessage) =
@@ -1495,7 +1516,10 @@ Format:
                 member _.AccessibleDomain = CommandAccessibleDomain.All
                 member _.Privilege = CommandPrivilege.Normal
                 member _.Execute env args =
-                    args.Head
+                    match args with
+                    | [] -> Unit
+                    | [x] -> x
+                    | _ -> env.log "Expected one argument"; Unit
         type MakeTupleCommand() =
             interface ICommand with
                 member _.Name = "tuple"
@@ -1685,7 +1709,7 @@ Format:
             (Builtin.operators.Values |> List.ofSeq) @ (Builtin.commands.Values |> List.ofSeq)
         let inline addCommand (bot: AestasBot) (cmd: ICommand) =
             bot.Commands.Add(cmd.Name, cmd)
-        let inline addContentParser (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot -> string) =
+        let inline addContentParser (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot -> StringBuilder -> unit) =
             bot.MappingContentCtorTips.Add(name, (ctor, tip))
         let inline addProtocolContentCtorTip (bot: AestasBot) (ctor: ProtocolSpecifyContentCtor, name: string, tip: AestasBot -> string) =
             bot.ProtocolContentCtorTips.Add(name, (ctor, tip))
@@ -1694,7 +1718,7 @@ Format:
         let inline updateCommand (bot: AestasBot) (cmd: ICommand) =
             if bot.Commands.ContainsKey cmd.Name then bot.Commands.[cmd.Name] <- cmd
             else failwith $"Can only update existing item"
-        let inline updateContentParser (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot -> string) =
+        let inline updateContentParser (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot -> StringBuilder -> unit) =
             if bot.MappingContentCtorTips.ContainsKey name then bot.MappingContentCtorTips.[name] <- (ctor, tip)
             else failwith $"Can only update existing item"
         let inline addCommands (bot: AestasBot) (cmds: ICommand list) =

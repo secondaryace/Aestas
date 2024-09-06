@@ -6,7 +6,10 @@ Configure everything in F# code, no need to write JSON or YAML.
 **English** | [简体中文](README_zh.md)
 ## Build
 ```bash
-aestas build
+./aestas.sh build
+```
+```pwsh
+.\aestas.ps1 build
 ```
 ## Modules
 | Type | File | .NET Type |
@@ -16,10 +19,10 @@ aestas build
 | Protocol | src/adapters/ | ```Aestas.Core.IProtocolAdapter``` |
 | Bot | src/bots/ | ```Aestas.Core.AestasBot``` |
 | Command | src/commands/ | ```Aestas.Core.ICommand``` |
-| Plugin | src/plugins/ | ```Aestas.Core.IAestasMappingContent``` |
-| Plugin | src/plugins/ | ```Aestas.Core.IProtocolSpecifyContent```|
+| Content Parser | src/plugins/ | ```Aestas.AutoInit.IAutoInit<string*MappingContentCtor*SystemInstructionBuilder, unit>``` |
 | LLM | src/llms/ | ```Aestas.Core.ILanguageModelClient``` |
 ## Built-in Support
 - [x] Console
-- [x] QQ (via Language)
+- [x] QQ (via Lagrange)
 - [ ] Satori
+- [ ] WebUI (5%)

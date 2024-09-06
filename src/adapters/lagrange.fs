@@ -332,10 +332,10 @@ module rec AestasLagrangeBot =
                 ) |> bot.Invoker.add_OnGroupPokeEvent
             member _.FetchDomains() = 
                 let privates = 
-                    bot.FetchFriends().Result
+                    bot.FetchFriends(true).Result
                     |> ArrList.map (fun f -> struct(f.Nickname, f.Uin))
                 let groups = 
-                    bot.FetchGroups().Result
+                    bot.FetchGroups(true).Result
                     |> ArrList.map (fun f -> struct(f.GroupName, f.GroupUin))
                 let result =
                     Array.init (privates.Count+groups.Count) (fun i -> 
@@ -347,7 +347,7 @@ module rec AestasLagrangeBot =
                             struct(name, uin, false)
                     )
                 groupsCache <- Some result; result
-            member this.InitDomainView(abot, domainId) = 
+            member this.InitDomainView abot domainId = 
                 let groups = 
                     match groupsCache with
                     | Some g -> g

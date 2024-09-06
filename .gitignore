@@ -18,4 +18,8 @@ extensions/Release/*
 fable/*
 src/tests/interactive/privateVar.fsx
 src/tests/interactive/privateVar.csx
+/src/web/Aestas.WebUI/obj
+/src/web/Aestas.WebUI/Properties
+/src/web/Aestas.WebUI/bin
+/src/web/Aestas.WebUI/.vs
 aestas.fsproj
