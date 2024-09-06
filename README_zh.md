@@ -3,9 +3,11 @@
 
 一切使用F#代码配置，无需编写JSON或YAML。
 ## **构建**
+Linux：
 ```bash
 ./aestas.sh build
 ```
+Windows：
 ```pwsh
 .\aestas.ps1 build
 ```

@@ -30,7 +30,12 @@ module Ernie =
         (jsonDeserialize<Json.Nodes.JsonObject>(result)["access_token"]).ToString()
     let messageCtor bot domain role message = 
         {role = role; content = message}        
-    let getReplyFromResponse response = (response |> jsonDeserialize<ErnieResponse>).result
+    let getReplyFromResponse response = 
+        try
+            (response |> jsonDeserialize<ErnieResponse>).result
+        with ex ->
+            Logger.logError[0] ex.Message
+            "..."
     let payloadCtor (generationConfig: GenerationConfig) (bot: AestasBot) domain messages =
         {
             messages = messages

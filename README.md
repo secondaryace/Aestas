@@ -5,9 +5,11 @@ Configure everything in F# code, no need to write JSON or YAML.
 
 **English** | [简体中文](README_zh.md)
 ## Build
+Linux:
 ```bash
 ./aestas.sh build
 ```
+Windows:
 ```pwsh
 .\aestas.ps1 build
 ```

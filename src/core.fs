@@ -907,7 +907,9 @@ Format:
                     consoleChat.CachedContext.Add $"You: {msg}"
                     let consoleMessage = ConsoleMessage(consoleChat.Messages :?> ConsoleMessageCollection, consoleUser, msg)
                     async { 
-                        do! consoleMessage |> consoleChat.OnReceiveMessage |> Async.Ignore
+                        try
+                            do! consoleMessage |> consoleChat.OnReceiveMessage |> Async.Ignore
+                        with ex -> consoleChat.CachedContext.Add $"Error: {ex.Message}"
                         this.ConsoleHook()
                     } |> Async.Start |> ignore
             /// only for cli
