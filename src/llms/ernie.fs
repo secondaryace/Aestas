@@ -34,7 +34,7 @@ module Ernie =
         try
             (response |> jsonDeserialize<ErnieResponse>).result
         with ex ->
-            Logger.logError[0] ex.Message
+            Logger.logError[0] $"Gemini response parse failed: {ex}, {response}"
             "..."
     let payloadCtor (generationConfig: GenerationConfig) (bot: AestasBot) domain messages =
         {

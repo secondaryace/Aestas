@@ -50,8 +50,8 @@ module Cli =
                     |> p.Append
                     TextView("Commands:", Some ConsoleColor.Gray, 0, 8) |> p.Append
                     TextView("([Z]↓,[X]↑)", Some ConsoleColor.DarkGray, 10, 8) |> p.Append
-                    VerticalListView(b.Commands.Keys |> Array.ofSeq, 
-                        (fun this t -> stringDrawCursor $"{this}" t), 
+                    VerticalListView(b.CommandExecuters |> Array.ofSeq |> Array.map (fun c -> $"{c.Key}: {c.Value.GetType().Name}"), 
+                        (stringDrawCursor), 
                         ConsoleKey.X, ConsoleKey.Z, 4, 9, Console.WindowWidth-17, 5)
                     |> p.Append
                     p),

@@ -9,7 +9,7 @@ open Aestas.Core
 open Aestas.Core.BotHelper
 open Aestas.AutoInit
 // open the adapter you want to use
-open Aestas.Adapters.AestasLagrangeBot
+//open Aestas.Adapters.AestasLagrangeBot
 // open the model you want to use
 open Aestas.Llms.Gemini
 // open module of the plugins you want to use
@@ -18,6 +18,8 @@ open Aestas.Plugins.MsBing
 open Aestas.Plugins.Sticker
 // open commands namespace if you want to use commands
 open Aestas.Commands
+// there are many CommandExecuters, AestasScriptExecuter for example
+open Aestas.Commands.AestasScript
 
 type TemplateBot =
     interface IAutoInit<AestasBot, unit> with
@@ -68,15 +70,19 @@ Your system instruction here
             tryGetProtocol "WebUIAdapter" 
             |> Option.map (fun p -> p.InitDomainView bot 2u |> bindDomain bot)
             |> ignore
-            // primary commands, like lsdomain, version, etc.
-            getPrimaryCommands() |> addCommands bot
-            // these commands could be removed
-            addCommands bot [
-                getCommand<InfoCommand>()
-                getCommand<RegenerateCommand>()
-                getCommand<TodaysDietCommand>()
-                getCommand<SystemCommand>()
-                getCommand<GuessWordCommand>()
+            addCommandExecuters bot [
+                "/", makeExecuterWithBuiltinCommands []
+                "#", AestasScriptExecuter([
+                    AestasScriptCommands.version()
+                    AestasScriptCommands.clear()
+                    AestasScriptCommands.help()
+                    RegenerateCommand.make()
+                    TodaysDietCommand.make()
+                    InfoCommand.make()
+                ])
+                ">", ObsoletedCommand.ObsoletedCommandExeuter([
+                    ObsoletedCommands.commands()
+                ])
             ]
             // these plugins could be removed
             addContentParsers bot [

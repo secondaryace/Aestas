@@ -1,0 +1,157 @@
+//This parser has been writen with help of "Real world OCaml" book By Yaron Minsky, Anil Madhavapeddy, Jason Hickey (chapter 16)
+%{
+open Aestas.Commands.Compiler.Language
+%}
+
+%start parse
+
+%token <float> NUMBER
+%token <string> ID
+%token <string> STRING
+%token LAMBDA
+%token LET
+%token TRUE
+%token FALSE
+%token IF
+%token THEN
+%token ELSE
+%token LEFT_BRACE
+%token RIGHT_BRACE
+%token LEFT_BRACK
+%token RIGHT_BRACK
+%token LEFT_PAREN
+%token RIGHT_PAREN
+%token PIPE
+%token <string> BINOP_0
+%token <string> BINOP_1
+%token EQUAL
+%token RIGHT_ARROW
+%token COLON
+%token COMMA
+%token DOT
+%token POWER
+%token SPACE
+%token NEWLINE
+%token EOF
+
+%type <Aestas.Commands.Compiler.Language.Ast list> parse
+
+%%
+
+parse: lines { $1 }
+
+lines:
+  | { [] }
+  | ID EOF { [Call(Identifier($1), [])] }
+  | rev_lines EOF { List.rev $1 }
+  | rev_lines { List.rev $1 }
+  | NEWLINE rev_lines { List.rev $2 }
+  | NEWLINE rev_lines NEWLINE { List.rev $2 }
+  | rev_lines NEWLINE { List.rev $1 }
+
+rev_lines:
+  | SPACE expr { [$2] }
+  | expr { [$1] }
+  | rev_lines NEWLINE expr { $3::$1 }
+
+expr: 
+  | tuple { $1 }
+  | bind { $1 }
+
+bind:
+  | LET SPACE ID maybe_space LEFT_PAREN maybe_space RIGHT_PAREN maybe_space EQUAL maybe_space expr_or_lines { Let (Identifier $3, [Lambda ([], $11)]) }
+  | LET SPACE ID rev_fargs maybe_space EQUAL maybe_space expr_or_lines { Let (Identifier $3, [Lambda (List.rev $4, $8)]) }
+  | LET SPACE ID maybe_space EQUAL maybe_space expr_or_lines { Let (Identifier $3, $7) }
+  | LET SPACE ftuple maybe_space EQUAL maybe_space expr_or_lines { Let ($3, $7) }
+
+tuple:
+  | { Tuple [] }
+  | rev_tuple { match $1 with [x] -> x | x -> Tuple(List.rev x) }
+
+rev_tuple:
+  | value_expr { [$1] }
+  | rev_tuple COMMA maybe_space value_expr maybe_space { $4::$1 }
+
+maybe_space:
+  | SPACE { }
+  | { }
+
+value_expr: 
+  | LAMBDA SPACE LEFT_PAREN maybe_space RIGHT_PAREN maybe_space RIGHT_ARROW maybe_space expr_or_lines { Lambda ([], $9) }
+  | LAMBDA rev_fargs maybe_space RIGHT_ARROW maybe_space expr_or_lines { Lambda (List.rev $2, $6) }
+  | value_expr LEFT_PAREN RIGHT_PAREN { Call($1, []) }
+  | value_expr rev_args SPACE { Call($1, List.rev $2) }
+  | value_expr rev_args { Call($1, List.rev $2) }
+  | value_expr maybe_space PIPE maybe_space atom { Call($5, [$1]) }
+  | IF SPACE atom_or_lines SPACE THEN SPACE atom_or_lines SPACE ELSE SPACE atom_or_lines { If($3, $7, $11) }
+  | atom { $1 }
+
+if:
+  | IF SPACE atom_or_lines SPACE THEN SPACE atom_or_lines SPACE ELSE SPACE atom_or_lines { If($3, $7, $11) }
+  | IF SPACE atom_or_lines SPACE THEN SPACE atom_or_lines { If($3, $7, [Unit]) }
+
+atom_or_lines:
+  | LEFT_PAREN lines RIGHT_PAREN { $2 }
+  | atom { [$1] }
+
+expr_or_lines:
+  | LEFT_PAREN lines RIGHT_PAREN { $2 }
+  | expr { [$1] }
+
+rev_args:
+  | SPACE atom { [$2] }
+  | rev_args SPACE atom { $3::$1 }
+
+rev_fargs:
+  | SPACE ID { [$2] }
+  | rev_fargs SPACE ID { $3::$1 }
+
+ftuple: 
+  | { Tuple [] }
+  | rev_ftuple { match $1 with [x] -> x | x -> Tuple(List.rev x) }
+
+rev_ftuple:
+  | fatom { [$1] }
+  | rev_ftuple COMMA maybe_space atom maybe_space { $4::$1 }
+
+fatom:
+  | ID { Identifier $1 }
+  | LEFT_PAREN maybe_space ftuple maybe_space RIGHT_PAREN { $3 }
+
+atom: atom_eq { $1 }
+
+atom_eq: 
+  | atom_plus { $1 }
+  | atom_plus EQUAL atom_plus { Call(Identifier "=", [$1; $3]) }
+
+atom_plus: 
+  | atom_mul { $1 }
+  | atom_mul BINOP_0 atom_mul { Call(Identifier $2, [$1; $3]) }
+
+atom_mul: 
+  | atom_powertuple { $1 }
+  | atom_powertuple BINOP_1 atom_powertuple { Call(Identifier $2, [$1; $3]) }
+
+atom_powertuple: rev_power_tuple { match $1 with [x] -> x | x -> Tuple(List.rev x) }
+
+rev_power_tuple:
+  | atom_unary { [$1] }
+  | rev_power_tuple POWER atom_unary { $3::$1 }
+
+atom_unary:
+  | term { $1 }
+  | BINOP_0 NUMBER { match $1 with "+" -> Number $2 | "-" -> Number (-$2) | _ -> failwith "Invalid unary operator" }
+  | BINOP_0 term { Call(Identifier $1, [$2]) }
+
+term:
+  | ID { Identifier $1 }
+  | BINOP_0 { Identifier $1 }
+  | BINOP_1 { Identifier $1 }
+  | EQUAL { Identifier "=" }
+  | POWER { Identifier "^" }
+  | NUMBER { Number $1 }
+  | STRING { String $1 }
+  | TRUE { Bool true }
+  | FALSE { Bool false }
+  | LEFT_PAREN maybe_space RIGHT_PAREN { Unit }
+  | LEFT_PAREN maybe_space expr maybe_space RIGHT_PAREN { $3 }

@@ -1,5 +1,4 @@
-﻿<Project Sdk="Microsoft.NET.Sdk">
-
+<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -9,20 +8,19 @@
     <ProduceReferenceAssembly>False</ProduceReferenceAssembly>
     <UseCommonOutputDirectory>true</UseCommonOutputDirectory>
   </PropertyGroup>
-  
   <PropertyGroup>
     <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
     <AppendRuntimeIdentifierToOutputPath>false</AppendRuntimeIdentifierToOutputPath>
   </PropertyGroup>
-  
   <ItemGroup>
     <PackageReference Include="FSharp.Core" Version="8.0.400" />
   </ItemGroup>
-  
   <ItemGroup>
     <Reference Include="aestas">
       <HintPath>..\..\bin\Release\net8.0\aestas.dll</HintPath>
     </Reference>
   </ItemGroup>
-
+  <ItemGroup>
+    <Compile Include="..\..\src\commands\compiler\Library.fs" />
+  </ItemGroup>
 </Project>

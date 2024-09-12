@@ -101,6 +101,7 @@ let xml = [
     [spaceLine]
     [itemGroupStart]
     [packageReference "FSharp.SystemTextJson" "1.3.13"]
+    [packageReference "FSharpPlus" "1.6.1"]
     nuget |> foldIList (fun list (n, v) -> packageReference n v::list) []
     [itemGroupEnd]
     [spaceLine]
