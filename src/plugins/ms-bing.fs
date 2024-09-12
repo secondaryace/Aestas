@@ -37,7 +37,7 @@ module MsBing =
         else
             Error response.ReasonPhrase
     type MsBingFunction =
-        interface IAutoInit<string*MappingContentCtor*SystemInstructionBuilder, unit> with
+        interface IAutoInit<string*ContentParser*SystemInstructionBuilder, unit> with
             static member Init _ = 
                 "bing"
                 , fun bot domain params' content ->

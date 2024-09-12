@@ -15,7 +15,7 @@ module Sticker =
     type Strickers = {stickers: Dictionary<string, StickerInfo>}
     let cache = Dictionary<string, byte[]>()
     type StickerParser =
-        interface IAutoInit<string*MappingContentCtor*(AestasBot -> StringBuilder -> unit), unit> with
+        interface IAutoInit<string*ContentParser*(AestasBot -> StringBuilder -> unit), unit> with
             static member Init _ = 
                 "sticker"
                 , fun bot domain params' content ->

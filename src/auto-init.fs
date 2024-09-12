@@ -10,22 +10,17 @@ open Aestas.Core.Logger
 
 /// AutoInit is a type-safe auto initializer.
 /// It will scan all types in the current app domain and initialize all types that implement IAutoInit.
-/// <summary>Impl IAutoInit<AestasBot, unit> -> bot</summary>
-/// <summary>Impl IAutoInit<(ContentParam->IProtocolSpecifyContent)*string*string, unit> -> protocolContentCtors</summary>
-/// <summary>Impl IAutoInit<(ContentParam->IAestasMappingContent)*string*string, unit> -> mappingContentCtors</summary>
-/// <summary>Impl IAutoInit<IProtocolAdapter*string, unit> -> protocols</summary>
-/// <summary>Impl IAutoInit<ICommand, unit> -> commands</summary>
 module AutoInit =
     type IAutoInit<'t, 'tArg> =
         static abstract member Init: 'tArg -> 't
     let private _protocols = Dictionary<Type, IProtocolAdapter>()
     let private _bots = arrList<AestasBot>()
-    let private _mappingContentCtorTips = Dictionary<Type, MappingContentCtor*string*(AestasBot -> StringBuilder -> unit)>()
+    let private _mappingContentCtorTips = Dictionary<Type, ContentParser*string*(AestasBot -> StringBuilder -> unit)>()
     let private _protocolContentCtorTips = Dictionary<Type, ProtocolSpecifyContentCtor*string*(AestasBot->string)>()
     let private _commands = Dictionary<Type, CommandExecuter>()
     let bots = _bots :> IReadOnlyList<AestasBot>
     let protocols = _protocols :> IReadOnlyDictionary<Type, IProtocolAdapter>
-    let mappingContentCtorTips = _mappingContentCtorTips :> IReadOnlyDictionary<Type, MappingContentCtor*string*(AestasBot -> StringBuilder -> unit)>
+    let mappingContentCtorTips = _mappingContentCtorTips :> IReadOnlyDictionary<Type, ContentParser*string*(AestasBot -> StringBuilder -> unit)>
     let protocolContentCtorTips = _protocolContentCtorTips :> IReadOnlyDictionary<Type, ProtocolSpecifyContentCtor*string*(AestasBot->string)>
     let commands = _commands :> IReadOnlyDictionary<Type, CommandExecuter>
     let inline invokeInit<'t, 'tArg> (t: Type) (arg: 'tArg) =
@@ -38,7 +33,7 @@ module AutoInit =
         match protocols |> Dict.tryFind (fun k v -> k.Name = s) with
         | Some (k, v) -> Some v
         | None -> None
-    let inline tryGetMappingContentCtorTip s =
+    let inline tryGetContentParserTip s =
         match mappingContentCtorTips |> Dict.tryFind (fun k v -> k.Name = s) with
         | Some (k, v) -> Some v
         | None -> None
@@ -50,7 +45,7 @@ module AutoInit =
         if commands.ContainsKey typeof<'t> then commands[typeof<'t>] else failwith $"Command Executer {toString typeof<'t>} not found"
     let inline getProtocol<'t when 't :> IProtocolAdapter> () =
         if protocols.ContainsKey typeof<'t> then protocols[typeof<'t>] else failwith $"Protocol {toString typeof<'t>} not found"
-    let inline getContentParser<'t when 't :> IAutoInit<string*MappingContentCtor*(AestasBot -> StringBuilder -> unit), unit>> () =
+    let inline getContentParser<'t when 't :> IAutoInit<string*ContentParser*(AestasBot -> StringBuilder -> unit), unit>> () =
         if mappingContentCtorTips.ContainsKey typeof<'t> then mappingContentCtorTips[typeof<'t>] else failwith $"ContentParser {toString typeof<'t>} not found"
     let inline getProtocolContentCtorTip<'t when 't :> IProtocolSpecifyContent> () =
         if protocolContentCtorTips.ContainsKey typeof<'t> then protocolContentCtorTips[typeof<'t>] else failwith $"ProtocolContentCtor {toString typeof<'t>} not found"
@@ -95,7 +90,7 @@ module AutoInit =
                     let name, ctor, tip = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized content plugin {toString t'}"
                     _protocolContentCtorTips.TryAdd(t', (ctor, name, tip)) |> ignore
-            | [|t; targ|] when t = typeof<string*MappingContentCtor*(AestasBot -> StringBuilder -> unit)> && targ = typeof<unit> -> 
+            | [|t; targ|] when t = typeof<string*ContentParser*(AestasBot -> StringBuilder -> unit)> && targ = typeof<unit> -> 
                 InitTypes.ContentParser, fun () ->
                     let name, ctor, tip = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized content plugin {toString t'}"

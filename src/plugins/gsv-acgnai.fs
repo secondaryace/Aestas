@@ -74,7 +74,7 @@ module Gsv_Acgnai =
             Logger.logInfo[0] $"Gsv_Acgnai Error: {response.ReasonPhrase}"
             raise <| new Exception(response.ReasonPhrase)
     type Gsv_AcgnaiParser =
-        interface IAutoInit<string*MappingContentCtor*(AestasBot -> StringBuilder -> unit), unit> with
+        interface IAutoInit<string*ContentParser*(AestasBot -> StringBuilder -> unit), unit> with
             static member Init _ = 
                 "gsvVoice"
                 , fun bot domain params' content ->

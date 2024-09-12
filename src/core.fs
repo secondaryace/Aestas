@@ -203,7 +203,7 @@ type InputConverterFunc = IMessageAdapterCollection -> AestasContent -> string
 /// domain * params * content
 type 't ContentCtor = AestasBot -> AestasChatDomain -> (string*string) list -> string -> 't
 type OverridePluginFunc = AestasContent ContentCtor
-type MappingContentCtor = Result<AestasContent, string> ContentCtor
+type ContentParser = Result<AestasContent, string> ContentCtor
 type ProtocolSpecifyContentCtor = Result<IProtocolSpecifyContent, string> ContentCtor
 type SystemInstructionBuilder = AestasBot -> StringBuilder -> unit
 type PrefixBuilder = AestasBot -> AestasMessage -> AestasMessage
@@ -229,7 +229,7 @@ type AestasBot() =
     member val ContentParseStrategy = StrategyParseAndAlertError with get, set
     member val ContextStrategy = StrategyContextReserveAll with get, set
     member val MemberCommandPrivilege: Dictionary<uint32, CommandPrivilege> = Dictionary() with get
-    member val ContentParsers: Dictionary<string, struct(MappingContentCtor*(AestasBot -> StringBuilder -> unit))> = Dictionary() with get
+    member val ContentParsers: Dictionary<string, struct(ContentParser*(AestasBot -> StringBuilder -> unit))> = Dictionary() with get
     member val ProtocolContentCtorTips: Dictionary<string, struct(ProtocolSpecifyContentCtor*(AestasBot->string))> = Dictionary() with get
     member val SystemInstructionBuilder: PipeLineChain<AestasBot*StringBuilder> option = None with get, set
     member val PrefixBuilder: PrefixBuilder option = None with get, set
@@ -449,6 +449,12 @@ type CommandExecuter<'t>(commands: 't seq) =
     abstract member AddCommand: 't -> unit
     member _.Commands: arrList<'t> = arrList commands
     default this.AddCommand command = this.Commands.Add command
+type TextToImageArgument ={
+    prompt: string
+    negative: string
+    resolution: int*int
+    seed: int option
+    }
 type UnitMessageAdapter(message: AestasMessage, collection: UnitMessageAdapterCollection) =
     interface IMessageAdapter with
         member _.Mention uid = message.content |> List.exists (fun x -> 
@@ -1098,193 +1104,12 @@ module Builtin =
             executer.Commands |>
             ArrList.iter (fun v -> sb.Append $"\n* {v.name}:\n   {v.description}" |> ignore)
             sb.ToString() |> env.log
-    }
+        }
     let commands() = [
             versionCommand()
             clearCommand()
             helpCommand()
         ]
-    // let identityCommand = CommandImplement(
-    //     "id",
-    //     "Operator: x ... -> x",
-    //     CommandAccessibleDomain.All, 
-    //     CommandPrivilege.Normal,
-    //     fun env args -> 
-    //         match args with
-    //         | x::[] -> x
-    //         | _ -> env.log "Expected one argument"; Unit)
-    
-    // type MakeTupleCommand() =
-    //     interface Command<Atom list, Atom> with
-    //         member _.Name = "tuple"
-    //         member _.Help = "Operator: x y ... -> (x, y, ...)"
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             args |> AtomTuple
-    // type EqualCommand() = //not yet implemented
-    //     interface Command<Atom list, Atom> with
-    //         member _.Name = "eq"
-    //         member _.Help = "Operator: eq x y -> 1 if x = y, 0 otherwise"
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             match args with
-    //             | x::y::[] -> 
-    //                 match x, y with
-    //                 | Number x, Number y -> if x = y then Number 1. else Number 0.
-    //                 | String x, String y -> if x = y then Number 1. else Number 0.
-    //                 | Identifier x, Identifier y -> if x = y then Number 1. else Number 0.
-    //                 | _, _ -> env.log "Expected same type"; Number 0.
-    //             | _ -> env.log "Expected two arguments"; Number 0.
-    // type ProjectionCommand() =
-    //     interface Command<Atom list, Atom> with
-    //         member _.Name = "proj"
-    //         member _.Help = "Operator: proj \"a\" ({a: x; b: y, ...}, {a: z; b: w, ...}, ...) -> (x, z, ...)"
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             match args with
-    //             | Identifier x::AtomTuple ls::[] -> 
-    //                 let rec go acc = function
-    //                 | [] -> acc |> List.rev
-    //                 | AtomObject o::t -> 
-    //                     match o |> Map.tryFind x with
-    //                     | Some v -> go (AtomObject(Map [x, v])::acc) t
-    //                     | None -> env.log $"Key {x} not found"; go (Unit::acc) t
-    //                 | _ -> env.log "Expected object"; go (Unit::acc) []
-    //                 go [] ls |> AtomTuple
-    //             | AtomTuple xs::AtomTuple ls::[] ->
-    //                 let rec go acc = function
-    //                 | [] -> acc |> List.rev
-    //                 | AtomObject o::t -> 
-    //                     ((xs 
-    //                     |> List.map (function
-    //                         | Identifier x -> 
-    //                             match o |> Map.tryFind x with
-    //                             | Some v -> x, v
-    //                             | None -> env.log $"Key {x} not found"; "_", Unit
-    //                         | _ -> env.log "Expected identifier"; "_", Unit)
-    //                     |> Map |> AtomObject)::acc |> go) t
-    //                 | _ -> env.log "Expected object"; go (Unit::acc) []
-    //                 go [] ls |> AtomTuple
-    //             | _ -> env.log "Expected identifier and object tuple"; Unit
-    // type DummyIfCommand() =
-    //     interface Command<Atom list, Atom> with
-    //         member _.Name = "if"
-    //         member _.Help = "Operator: if 0 x y -> y, if 1 x y -> x"
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             args |> AtomTuple
-    // type VersionCommand() =
-    //     inherit Command<Atom list, Atom>
-    //         member _.Name = "version"
-    //         member _.Help = "Print the version of Aestas"
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             env.log $"Aestas version {version}"; Unit
-    // type DomainInfoCommand() =
-    //     inherit Command<Atom list, Atom>
-    //         member _.Name = "domaininfo"
-    //         member _.Help = "Print the current domain info"
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             Map [
-    //                 "id", env.domain.DomainId |> float |> Number
-    //                 "name", env.domain.Name |> String
-    //                 "private", if env.domain.Private then Number 1. else Number 0.
-    //             ] |> AtomObject
-    // type ListDomainCommand() =
-    //     inherit Command<Atom list, Atom>
-    //         member _.Name = "lsdomain"
-    //         member _.Help = "List all domains"
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             let sb = StringBuilder()
-    //             env.bot.Domains |>
-    //             Seq.map (fun p ->
-    //                 Map [
-    //                     "id", p.Value.DomainId |> float |> Number
-    //                     "name", p.Value.Name |> String
-    //                     "private", if p.Value.Private then Number 1. else Number 0.
-    //                 ] |> AtomObject)
-    //             |> List.ofSeq
-    //             |> AtomTuple
-    // type HelpCommand() =
-    //     inherit Command<Atom list, Atom>
-    //         member _.Name = "help"
-    //         member _.Help = "List all commands"
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             let sb = StringBuilder()
-    //             sb.Append "## Commands" |> ignore
-    //             env.bot.Commands |>
-    //             Dict.iter (fun _ v -> sb.Append $"\n* {v.Name}:\n   {v.Help}" |> ignore)
-    //             sb.ToString() |> env.log; Unit
-    // type DumpCommand() =
-    //     inherit Command<Atom list, Atom>
-    //         member _.Name = "dump"
-    //         member _.Help = """Dump the cached context, the input index is from the end of the context | Usage: dump [from=count-1] [to=0]"""
-    //         member _.AccessibleDomain = CommandAccessibleDomain.All
-    //         member _.Privilege = CommandPrivilege.Normal
-    //         member _.Execute env args =
-    //             let msgs = env.domain.Messages
-    //             let args, _ = args |> CommandHelper.parseArguments [
-    //                 CommandHelper.ParamNumber("from", msgs.Count-1 |> float |> Some)
-    //                 CommandHelper.ParamNumber("to", Some 0.)
-    //             ]
-    //             let s, t =
-    //                 match args["from"], args["to"] with
-    //                 | CommandHelper.ArgNumber x, CommandHelper.ArgNumber y -> msgs.Count-1-int x, msgs.Count-1-int y
-    //                 | _ -> failwith "Should not happen"
-    //             let sb = StringBuilder()
-    //             sb.Append "## Cached Context:" |> ignore
-    //             let rec go i =
-    //                 if i > t then ()
-    //                 else
-    //                     let m = msgs[i].Parse()
-    //                     sb.Append $"\n* {m.sender.name}:\n   {m.content}\n  ({m.mid})" |> ignore
-    //                     go (i+1)
-    //             go s
-    //             sb.ToString() |> env.log; Unit
-    // let operators = Map.ofList [
-    //     "id", IdentityCommand() :> ICommand<Atom list, Atom>
-    //     "tuple", MakeTupleCommand()
-    //     "proj", ProjectionCommand()
-    //     "if", DummyIfCommand()
-    // ]
-    // let commands =  Map.ofList [
-    //     "version", VersionCommand() :> ICommand<Atom list, Atom>
-    //     "domaininfo", DomainInfoCommand()
-    //     "lsdomain", ListDomainCommand()
-    //     "help", HelpCommand()
-    //     "dump", DumpCommand()
-    //     "clear", ClearCommand()
-    // ]
-    // type BillionDollarBotClient() =
-    //     interface ILanguageModelClient with
-    //         member this.SendMessage bot domain message = (this :> ILanguageModelClient).SendContents bot domain message.content
-    //         member _.SendContents bot domain contents =
-    //             async {
-    //                 let strs =  contents |> List.map (modelInputConverters domain.Messages)
-    //                 strs |> String.concat " " |> modelOutputParser bot domain |> printfn "%A"
-    //                 let response =
-    //                     (strs |> String.concat " ")
-    //                         .Replace("You ", "~!@#")
-    //                         .Replace("I ", "You ")
-    //                         .Replace("~!@#", "I ")
-    //                         .Replace("you", "I ")
-    //                         .Replace("?", "!")
-    //                 return Ok [AestasText response], ignore
-    //             }
-    //         member _.CacheMessage bot domain message = ()
-    //         member _.CacheContents bot domain contents = ()
-    //         member _.ClearCache() = ()
 module BotHelper =
     let inline bindDomain (bot: AestasBot) domain =
         bot.BindDomain domain
@@ -1294,7 +1119,7 @@ module BotHelper =
     //    (Builtin.operators.Values |> List.ofSeq) @ (Builtin.commands.Values |> List.ofSeq)
     let inline addCommandExecuter (bot: AestasBot) key executer =
         bot.AddCommandExecuter key executer
-    let inline addContentParser (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot -> StringBuilder -> unit) =
+    let inline addContentParser (bot: AestasBot) (ctor: ContentParser, name: string, tip: AestasBot -> StringBuilder -> unit) =
         bot.ContentParsers.Add(name, (ctor, tip))
     let inline addProtocolContentCtorTip (bot: AestasBot) (ctor: ProtocolSpecifyContentCtor, name: string, tip: AestasBot -> string) =
         bot.ProtocolContentCtorTips.Add(name, (ctor, tip))
@@ -1303,7 +1128,7 @@ module BotHelper =
     // let inline updateCommand (bot: AestasBot) key executer =
     //     if bot.Commands.ContainsKey cmd.Name then bot.Commands.[cmd.Name] <- struct(typeof<'u>, typeof<'v>, cmd)
     //     else failwith $"Can only update existing item"
-    let inline updateContentParser (bot: AestasBot) (ctor: MappingContentCtor, name: string, tip: AestasBot -> StringBuilder -> unit) =
+    let inline updateContentParser (bot: AestasBot) (ctor: ContentParser, name: string, tip: AestasBot -> StringBuilder -> unit) =
         if bot.ContentParsers.ContainsKey name then bot.ContentParsers[name] <- (ctor, tip)
         else failwith $"Can only update existing item"
     let inline addCommandExecuters (bot: AestasBot) (cmds: (string * CommandExecuter) list) =

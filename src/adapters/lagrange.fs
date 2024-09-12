@@ -177,20 +177,27 @@ module rec AestasLagrangeBot =
                     | _ -> false
                 )
             member _.Collection = collection
-            member this.Command = 
-                if messageChain.GroupUin.HasValue then
-                    if messageChain.Count < 2 then None else
-                    match messageChain[0], messageChain[1] with
-                    | :? MentionEntity as m, (:? TextEntity as t) ->
-                        let t = t.Text.TrimStart()
-                        if m.Uin = collection.Domain.Self.uid && t.StartsWith '#'  then t.Substring 1 |> Some
-                        else None
-                    | _ -> None
-                elif messageChain.Count = 0 then None 
-                else
-                    match messageChain[0] with
-                    | :? TextEntity as t when t.Text.StartsWith '#' -> t.Text.Substring 1 |> Some
-                    | _ -> None
+            member this.TryGetCommand prefixs = 
+                prefixs 
+                |> Seq.tryFind (fun prefix ->
+                    if messageChain.GroupUin.HasValue then
+                        if messageChain.Count < 2 then false else
+                        match messageChain[0], messageChain[1] with
+                        | :? MentionEntity as m, (:? TextEntity as t) ->
+                            let t = t.Text.TrimStart()
+                            if m.Uin = collection.Domain.Self.uid && t.StartsWith prefix then true
+                            else false
+                        | _ -> false
+                    elif messageChain.Count = 0 then false
+                    else
+                        match messageChain[0] with
+                        | :? TextEntity as t when t.Text.StartsWith '#' -> true
+                        | _ -> false)
+                |> Option.map (fun prefix ->
+                    match messageChain |> IList.tryFind (fun t -> t :? TextEntity) with
+                    | Some t -> 
+                        prefix, (t :?> TextEntity).Text.Substring(prefix.Length)
+                    | _ -> prefix, "")
             member this.Preview = messageChain.ToPreviewText()
             member this.ParseAsPlainText() = {
                 sender = 

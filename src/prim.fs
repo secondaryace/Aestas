@@ -247,13 +247,25 @@ module Prim =
         sb.ToString()
     let bytesFromUrl (url: string) =
         try
-        use web = new HttpClient()
-        let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
-        web.DefaultRequestHeaders.Add("User-Agent", ua)
-        web.GetByteArrayAsync(url).Result
+            use web = new HttpClient()
+            let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+            web.DefaultRequestHeaders.Add("User-Agent", ua)
+            web.GetByteArrayAsync(url).Result
         with
         | _ -> 
             [|0uy|]
+    let bytesFromUrlAsync (url: string) =
+        async {
+            try
+                use web = new HttpClient()
+                let ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0.0.0 Safari/537.36"
+                web.DefaultRequestHeaders.Add("User-Agent", ua)
+                let! result = web.GetByteArrayAsync(url) |> Async.AwaitTask
+                return Ok result
+            with
+            | ex -> 
+                return Error ex.Message
+        }
     let bash (cmd: string) =
         let psi = Diagnostics.ProcessStartInfo("/bin/bash", $"-c \"{cmd}\"")
         psi.RedirectStandardOutput <- true

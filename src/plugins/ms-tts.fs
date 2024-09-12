@@ -43,7 +43,7 @@ module MsTts =
         else
             Error response.ReasonPhrase
     type MsTtsParser =
-        interface IAutoInit<string*MappingContentCtor*(AestasBot -> StringBuilder -> unit), unit> with
+        interface IAutoInit<string*ContentParser*(AestasBot -> StringBuilder -> unit), unit> with
             static member Init _ = 
                 "voice"
                 , fun bot domain params' content ->

@@ -15,17 +15,19 @@ let getFiles path =
 let ( @@ ) (a: 't[]) (b: 't[]) = Array.concat [a; b]
 let checkDir dir = if Directory.Exists dir then () else Directory.CreateDirectory dir |> ignore
 checkDir "src"
+checkDir "src/misc"
 checkDir "src/adapters"
 checkDir "src/bots"
 checkDir "src/commands"
 checkDir "src/llms"
 checkDir "src/plugins"
+let misc = getFiles "src/misc/"
 let adapters = getFiles "src/adapters/"
 let bots = getFiles "src/bots/"
 let commands = getFiles "src/commands/"
 let llms = getFiles "src/llms/"
 let plugins = getFiles "src/plugins/"
-let all = adapters @@ bots @@ commands @@ llms @@ plugins
+let all = misc @@ adapters @@ bots @@ commands @@ llms @@ plugins
 let proj = ResizeArray<string>()
 let nuget = ResizeArray<string*string>()
 let foldIList (folder: 'state -> 't -> 'state) (state: 'state) (list: IList<'t>) =
@@ -91,6 +93,7 @@ let xml = [
         "core.fs" |> src |> compileInclude
         "auto-init.fs" |> src |> compileInclude
     ]
+    misc |> foldIList (fun list x -> compileInclude x::list) []
     llms |> foldIList (fun list x -> compileInclude x::list) []
     adapters |> foldIList (fun list x -> compileInclude x::list) []
     plugins |> foldIList (fun list x -> compileInclude x::list) []
