@@ -178,6 +178,7 @@ module rec AestasLagrangeBot =
                 )
             member _.Collection = collection
             member this.TryGetCommand prefixs = 
+                let mutable cmdCache = ""
                 prefixs 
                 |> Seq.tryFind (fun prefix ->
                     if messageChain.GroupUin.HasValue then
@@ -185,19 +186,15 @@ module rec AestasLagrangeBot =
                         match messageChain[0], messageChain[1] with
                         | :? MentionEntity as m, (:? TextEntity as t) ->
                             let t = t.Text.TrimStart()
-                            if m.Uin = collection.Domain.Self.uid && t.StartsWith prefix then true
+                            if m.Uin = collection.Domain.Self.uid && t.StartsWith prefix then cmdCache <- t; true
                             else false
                         | _ -> false
                     elif messageChain.Count = 0 then false
                     else
                         match messageChain[0] with
-                        | :? TextEntity as t when t.Text.StartsWith '#' -> true
+                        | :? TextEntity as t when t.Text.StartsWith prefix -> cmdCache <- t.Text; true
                         | _ -> false)
-                |> Option.map (fun prefix ->
-                    match messageChain |> IList.tryFind (fun t -> t :? TextEntity) with
-                    | Some t -> 
-                        prefix, (t :?> TextEntity).Text.Substring(prefix.Length)
-                    | _ -> prefix, "")
+                |> Option.map (fun prefix -> prefix, cmdCache.Substring(prefix.Length))
             member this.Preview = messageChain.ToPreviewText()
             member this.ParseAsPlainText() = {
                 sender = 
