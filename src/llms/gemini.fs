@@ -23,16 +23,16 @@ module Gemini =
     type GSafetySetting = {category: string; threshold: string}
     type GSafetyRatting = {category: string; probability: string}
     type GProfile = {
-        api_key: string option
-        gcloudpath: string option
+        apiKey: string option
+        gcloudPath: string option
         safetySettings: GSafetySetting[]
         generation_configs: GenerationConfig option
         }
     type GGenerationConfig = {
-        maxOutputTokens: int
-        temperature: float
-        topP: float
-        topK: float
+        maxOutputTokens: int option
+        temperature: float option
+        topP: float option
+        topK: int option
         }
     type GRequest = {
         contents: GContent[]
@@ -49,17 +49,19 @@ module Gemini =
     type GResponse = {candidates: GCandidate[]}
     let postRequest (auth: GProfile) (url: string) (content: string) =
         async{
-            let useOauth = match auth.api_key with | Some _ -> false | None -> true
+            
+            match auth.apiKey, auth.gcloudPath with None, None -> failwith "Gemini: apiKey and gcloudPath can't be both None" | _ -> ()
+            let useOauth = match auth.apiKey with | Some _ -> false | None -> true
             let url =
                 if useOauth then 
                     logInfo["GeminiOAuth"] "Use OAuth.."
                     url
-                else $"{url}?key={auth.api_key.Value}"
+                else $"{url}?key={auth.apiKey.Value}"
             use web = new HttpClient()
             web.BaseAddress <- new Uri(url)
             if useOauth then 
                 let access_token = 
-                    let info = ProcessStartInfo(auth.gcloudpath.Value, "auth application-default print-access-token")
+                    let info = ProcessStartInfo(auth.gcloudPath.Value, "auth application-default print-access-token")
                     info.RedirectStandardOutput <- true
                     Process.Start(info).StandardOutput.ReadToEnd().Trim()
                 logInfo["GeminiOAuth"] "Get access-token successful.."
@@ -83,17 +85,26 @@ module Gemini =
                     topK = gs.topK
                 }
         let contentsCache = Dictionary<AestasChatDomain, struct(GContent*uint64) arrList>()
-        let parseContents (domain: AestasChatDomain) (contents: AestasContent list) =
+        let rec parseContents (bot: AestasBot) (domain: AestasChatDomain) (contents: AestasContent list) =
             let parts = arrList<GPart>()
             let parse i = function
             | AestasImage(bs, mime, w, h) -> 
                 parts.Add <| InlineData {inline_data = {mime_type = mime; data = bs |> Convert.ToBase64String}}
             | AestasQuote mid ->
                 match contentsCache[domain] |> ArrList.tryFindBack (snd' >> (=) mid) with
-                | Some msg -> 
+                | Some (msg, _) when msg.role = "model" -> 
                     parts.Add <| Text {text = "#[quote:" }
-                    parts.AddRange (fst' msg).parts
+                    parts.AddRange msg.parts
                     parts.Add <| Text {text = "]" }
+                | Some (_, mid) ->
+                    parts.Add <| Text {text = "#[quote:" }
+                    match domain.Messages |> IList.tryFindBack (fun m -> m.MessageId = mid) with
+                    | Some msgAdapter ->
+                        parts.Add <| Text {text = "#[quote:" }
+                        ((bot.ParseIMessageAdapter msgAdapter domain true).contents 
+                        |> parseContents bot domain).parts |> parts.AddRange
+                        parts.Add <| Text {text = "]" }
+                    | _ -> parts.Add <| Text {text = "#[quote: ...]" }
                 | None -> parts.Add <| Text {text = "#[quote: ...]" }
             | x -> 
                 parts.Add <| Text {text = Builtin.modelInputConverters domain x}// !
@@ -102,10 +113,10 @@ module Gemini =
         interface ILanguageModelClient with
             member this.CacheMessage bot domain message =
                 if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList())
-                contentsCache[domain].Add struct(message.content |> parseContents domain, message.mid)
+                contentsCache[domain].Add struct(message.contents |> parseContents bot domain, message.mid)
             member this.CacheContents bot domain content =
                 if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList())
-                contentsCache[domain].Add struct(content |> parseContents domain, 0UL)
+                contentsCache[domain].Add struct(content |> parseContents bot domain, 0UL)
             member this.GetReply bot domain =
                 async {
                     let countCache = contentsCache[domain].Count

@@ -56,6 +56,16 @@ module Logger =
     let logWarn = IndexerBox<obj, string -> unit> (__log LogLevel.Warn)
     let logError = IndexerBox<obj, string -> unit> (__log LogLevel.Error)
     let logFatal =  IndexerBox<obj, string -> unit> (__log LogLevel.Fatal)
+    let inline internal _logf (key: obj) (lv: LogLevel) (fmt: Printf.StringFormat<'t, unit>) = Printf.kprintf (_log key lv) fmt
+    let inline internal __logf (lv: LogLevel) (key: obj) (fmt: Printf.StringFormat<'t, unit>) = Printf.kprintf (_log key lv) fmt
+    let logf<'t> = IndexerBox<obj, LogLevel -> Printf.StringFormat<'t, unit> -> 't> _logf
+    let logTracef<'t> = IndexerBox<obj, Printf.StringFormat<'t, unit> -> 't> (__logf LogLevel.Trace)
+    let logDebugf<'t> = IndexerBox<obj, Printf.StringFormat<'t, unit> -> 't> (__logf LogLevel.Debug)
+    let logInfof<'t> = IndexerBox<obj, Printf.StringFormat<'t, unit> -> 't> (__logf LogLevel.Info)
+    let logWarnf<'t> = IndexerBox<obj, Printf.StringFormat<'t, unit> -> 't> (__logf LogLevel.Warn)
+    let logErrorf<'t> = IndexerBox<obj, Printf.StringFormat<'t, unit> -> 't> (__logf LogLevel.Error)
+    let logFatalf<'t> = IndexerBox<obj, Printf.StringFormat<'t, unit> -> 't> (__logf LogLevel.Fatal)
+    
 type IMessageAdapter =
     abstract member MessageId: uint64 with get
     abstract member SenderId: uint32 with get
@@ -196,7 +206,7 @@ type AestasContent =
 [<Struct>]
 type AestasMessage = {
     sender: AestasChatMember
-    content: AestasContent list
+    contents: AestasContent list
     mid: uint64
     }
 type InputConverterFunc = IMessageAdapterCollection -> AestasContent -> string
@@ -301,6 +311,17 @@ Format:
                 domain.Messages.Clear()
             | _ -> ()
         }
+    member this.ParseIMessageAdapter (message: IMessageAdapter) (domain: AestasChatDomain) (inQuote: bool) =
+        let message = 
+            match this.ContentLoadStrategy with
+            | StrategyLoadNone -> message.ParseAsPlainText()
+            | StrategyLoadAll ->  message.Parse()
+            | StrategyLoadByPredicate p when p message -> message.Parse()
+            | StrategyLoadOnlyMentionedOrPrivate when message.Mention domain.Self.uid || domain.Private || inQuote -> message.Parse()
+            | _ -> message.ParseAsPlainText()
+        match this.PrefixBuilder with
+        | Some build -> build this message
+        | None -> message
     member this.Reply (domain: AestasChatDomain) (message: IMessageAdapter) =
         async {
             do! this.CheckContextLength domain
@@ -325,17 +346,7 @@ Format:
                 | StrategyReplyAll, StrategyCacheNone ->
                     failwith "Check your strategy, you can't reply to message without any cache"
                 | _ -> ()
-                let message' = 
-                    match this.ContentLoadStrategy with
-                    | StrategyLoadNone -> message.ParseAsPlainText()
-                    | StrategyLoadAll ->  message.Parse()
-                    | StrategyLoadByPredicate p when p message -> message.Parse()
-                    | StrategyLoadOnlyMentionedOrPrivate when message.Mention domain.Self.uid || domain.Private -> message.Parse()
-                    | _ -> message.ParseAsPlainText()
-                let message' =
-                    match this.PrefixBuilder with
-                    | Some b -> b this message'
-                    | None -> message'
+                let message' = this.ParseIMessageAdapter message domain false
                 let callback' =
                     let callback' (callback: AestasMessage -> unit) rmsg = 
                         domain.Messages.Add rmsg
@@ -410,10 +421,34 @@ Format:
         domain.Messages.Clear()
         GC.Collect()
 type GenerationConfig = {
-    temperature: float
-    maxLength: int
-    topK: int
-    topP: float
+    /// factor to control the randomness of the generation
+    temperature: float option
+    /// maximum length of the generated text, in tokens
+    maxLength: int option
+    /// number of highest probability tokens to keep for top-k sampling
+    topK: int option
+    /// cumulative probability threshold for nucleus sampling, not supported by all models
+    topP: float option
+    /// frequency penalty to reduce the probability of repeating the same token, not supported by all models
+    frequencyPenalty: float option
+    /// when arives string in this list, the model will stop generating
+    stop: string list option
+    }
+let defaultGenerationConfig = {
+    temperature = Some 0.95
+    maxLength = Some 1024
+    topK = Some 64
+    topP = None
+    frequencyPenalty = None
+    stop = None
+    }
+let noneGenerationConfig = {
+    temperature = None
+    maxLength = None
+    topK = None
+    topP = None
+    frequencyPenalty = None
+    stop = None
     }
 type CacheMessageCallback = AestasMessage -> unit
 type ILanguageModelClient =
@@ -457,13 +492,13 @@ type TextToImageArgument ={
     }
 type UnitMessageAdapter(message: AestasMessage, collection: UnitMessageAdapterCollection) =
     interface IMessageAdapter with
-        member _.Mention uid = message.content |> List.exists (fun x -> 
+        member _.Mention uid = message.contents |> List.exists (fun x -> 
             match x with
             | AestasMention m -> m.uid = uid
             | _ -> false)
         member _.Parse() = message
         member _.ParseAsPlainText() = {
-            content = message.content 
+            contents = message.contents 
             |> List.map (function | AestasText s -> s | _ -> "") 
             |> String.concat "" |> AestasText |> List.singleton
             mid = message.mid
@@ -473,17 +508,17 @@ type UnitMessageAdapter(message: AestasMessage, collection: UnitMessageAdapterCo
         member _.TryGetCommand prefixs =
             prefixs
             |> Seq.tryFind (fun prefix ->
-                match message.content with
+                match message.contents with
                 | AestasText s::_ when s.StartsWith prefix -> 
                     true
                 | _ -> false)
             |> Option.map (fun prefix ->
-                match message.content with
+                match message.contents with
                 | AestasText s::_ -> 
                     prefix, s.Substring(prefix.Length)
                 | _ -> prefix, "")
         member _.MessageId = message.mid
-        member _.Preview = message.content |> List.map (function | AestasText s -> s | _ -> "") |> String.concat ""
+        member _.Preview = message.contents |> List.map (function | AestasText s -> s | _ -> "") |> String.concat ""
         member _.SenderId = message.sender.uid
 type UnitMessageAdapterCollection(domain: VirtualDomain) =
     inherit arrList<IMessageAdapter>()
@@ -507,7 +542,7 @@ type VirtualDomain(send, recall, bot, user, domainId, domainName, isPrivate) as 
     override val Bot = None with get, set
     override _.Send callback contents =
         async {
-            UnitMessageAdapter({sender = bot; content = contents; mid = mid}, messages) |> callback
+            UnitMessageAdapter({sender = bot; contents = contents; mid = mid}, messages) |> callback
             send mid contents
             mid <- mid + 1UL
             return Ok ()
@@ -523,7 +558,7 @@ type VirtualDomain(send, recall, bot, user, domainId, domainName, isPrivate) as 
         }
     member this.Input contents =
         async {
-            let message = {sender = user; content = contents; mid = mid}
+            let message = {sender = user; contents = contents; mid = mid}
             mid <- mid + 1UL
             match! UnitMessageAdapter(message, messages) |> this.OnReceiveMessage with
             | Ok () -> return Ok (), mid - 1UL
@@ -650,10 +685,22 @@ module Console =
                 setCursor this.X this.Y
                 Console.Write text
             base.Draw()
-    type DynamicObjectView<'t>(object: unit -> 't, drawCursor: DrawCursor<'t>, posX: int, posY: int, width: int, height: int) =
+    type DynamicCursorView<'t>(object: unit -> 't, drawCursor: DrawCursor<'t>, posX: int, posY: int, width: int, height: int) =
         inherit CliView(posX, posY, width, height)
         override this.Draw() =
             drawCursor (object()) struct(this.X, this.Y, this.X+width, this.Y+height) |> ignore
+    type DynamicObjectView<'t when 't :> CliView>(object: unit -> 't, posX: int, posY: int, width: int, height: int) =
+        inherit CliView(posX, posY, width, height)
+        override this.Draw() =
+            let toDraw = object()
+            this.Append toDraw
+            base.Draw()
+            this.Remove toDraw
+        override this.HandleInput info =
+            let toDraw = object()
+            this.Append toDraw
+            base.HandleInput info
+            this.Remove toDraw
     type InputView(action: string -> unit,posX: int, posY: int, width: int, height: int) =
         inherit CliView(posX, posY, width, height)
         let mutable text: string option = None
@@ -872,7 +919,7 @@ module ConsoleBot =
             member val MessageId = collection.Domain.InnerMid <- collection.Domain.InnerMid+1UL; collection.Domain.InnerMid
             member _.SenderId = sender.uid
             member _.Mention _ = false
-            member this.Parse() = {sender = sender; content = [AestasText msg]; mid = (this :> IMessageAdapter).MessageId}
+            member this.Parse() = {sender = sender; contents = [AestasText msg]; mid = (this :> IMessageAdapter).MessageId}
             member _.Collection = collection
             member _.TryGetCommand prefixs =
                 prefixs
@@ -953,25 +1000,33 @@ module Builtin =
             | _ -> 
                 cache.Append(botOut[i]) |> ignore
                 scanParam (i+1) r
-        let rec scanBracket i v f p =
+        // state index bracketLevel funcName param
+        let rec scanBracket s i v f p =
             match botOut[i] with
-            | '@' ->
+            | '@' when s = 0 ->
                 let f = if cache.Length <> 0 then cache.ToString() else f
                 cache.Clear() |> ignore
                 let i, pr, _ = scanParam (i+1) ("", "")
-                scanBracket i v f (pr::p)
-            | ':' -> 
+                scanBracket 1 i v f (pr::p)
+            | '@' when s < 1 ->
+                let i, pr, _ = scanParam (i+1) ("", "")
+                scanBracket 1 i v f (pr::p)
+            | ':' when s < 2 -> 
                 let f = if cache.Length <> 0 then cache.ToString() else f
                 cache.Clear() |> ignore
-                scanBracket (i+1) v f p
+                scanBracket 2 (i+1) v f p
             | ']' when v = 1 -> i+1, f, p, cache.ToString(), cache.Clear() |> ignore
             // ignore nested square brackets
-            | '[' -> scanBracket (i+1) (v+1) f p
-            | ']' -> scanBracket (i+1) (v-1) f p
+            | '[' -> 
+                cache.Append '[' |> ignore
+                scanBracket s (i+1) (v+1) f p
+            | ']' -> 
+                cache.Append ']' |> ignore
+                scanBracket s (i+1) (v-1) f p
             | _ ->
                 cache.Append botOut[i] |> ignore
                 if i+1 = botOut.Length then i+1, f, p, cache.ToString(), cache.Clear() |> ignore 
-                else scanBracket (i+1) v f p
+                else scanBracket s (i+1) v f p
         let rec go i =
             let checkCache() = 
                 if cache.Length > 0 then
@@ -989,7 +1044,7 @@ module Builtin =
             | '#', '[' ->
                 checkCache()
                 //#[name@pram=m@pram'=n:content]
-                let i, funcName, param, content, _ = scanBracket (i+2) 1 "" []
+                let i, funcName, param, content, _ = scanBracket 0 (i+2) 1 "" []
                 let error s =
                     match bot.ContentParseStrategy with
                     | StrategyParseAndAlertError ->
@@ -1050,7 +1105,7 @@ module Builtin =
         bot, sb
     let buildPrefix (bot: AestasBot) (msg: AestasMessage) =
         {
-            content = AestasText $"[{msg.sender.name}|{DateTime.Now:``yyyy-MM-dd HH:mm``}] "::msg.content
+            contents = AestasText $"[{msg.sender.name}|{DateTime.Now:``yyyy-MM-dd HH:mm``}] "::msg.contents
             sender = msg.sender
             mid = msg.mid
         }

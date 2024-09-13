@@ -14,7 +14,7 @@ module Ernie =
             member this.Role = this.role
             member this.Content = this.content
             member this.Bind f = {role = this.role; content = f this.content}
-    type ErniePayload = {messages: ErnieMessage arrList; temperature: float; top_p: float; system: string}
+    type ErniePayload = {messages: ErnieMessage arrList; temperature: float option; top_p: float option; system: string}
     type ErnieResponse = {
             result: string
             is_truncated: bool

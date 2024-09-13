@@ -12,7 +12,7 @@ module AestasScriptCommands =
         accessibleDomain = CommandAccessibleDomain.All
         privilege = CommandPrivilege.Normal
         execute = fun executer env ctx args -> 
-            env.log $"Aestas version {version}"
+            env.log $"Aestas version {version}\nAestas Script"
             ctx, Unit
         }
     let clear() = {

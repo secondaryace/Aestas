@@ -70,52 +70,66 @@ module rec AestasLagrangeBot =
             match entities with
             | (:? MarketfaceEntity)::(:? TextEntity as t)::_ -> [AestasText $"#[sticker:{t.Text.Trim('[', ']')}]"]
             | _ -> entities |> List.map this.ParseLagrangeEntity
-        member this.ParseAestasContent (content: AestasContent) =
-            match content with
-            | AestasText t -> new TextEntity(t) :> IMessageEntity |> Some
-            | AestasImage (bs, mime, w, h) -> new ImageEntity(bs) :> IMessageEntity |> Some
-            | AestasAudio (bs, mime) -> new RecordEntity(bs) :> IMessageEntity |> Some
-            | AestasVideo (bs, mime) -> new VideoEntity(bs) :> IMessageEntity |> Some
-            | AestasMention m -> 
-                new MentionEntity("@"+(cachedMembers 
-                    |> Array.find (fun m' -> m'.uid = m.uid)).name, m.uid) :> IMessageEntity |> Some
-            | AestasBlank -> None
-            | _ -> TextEntity "not supported" :> IMessageEntity |> Some
+        // when gets sequence like voice::text, text will be ignored, so we parse it to [voice]::[text]
+        member this.ParseAestasContents (contents: AestasContent list) (acc: IMessageEntity list list) =
+            match contents, acc with
+            | [], acc -> acc
+            | AestasBlank::r, _ ->  this.ParseAestasContents r acc
+            | AestasAudio (bs, mime)::r, _ -> 
+                this.ParseAestasContents r ([new RecordEntity(bs)]::acc)
+            | AestasVideo (bs, mime)::r, _ -> 
+                this.ParseAestasContents r ([new VideoEntity(bs)]::acc)
+            | AestasText t::r, [] ->
+                this.ParseAestasContents r [[new TextEntity(t)]]
+            | AestasText t::r, head::tail ->
+                this.ParseAestasContents r ((new TextEntity(t)::head)::tail)
+            | AestasImage (bs, mime, w, h)::r, [] ->
+                this.ParseAestasContents r [[new ImageEntity(bs)]]
+            | AestasImage (bs, mime, w, h)::r, head::tail -> 
+                this.ParseAestasContents r ((new ImageEntity(bs)::head)::tail)
+            | AestasMention m::r, [] ->
+                this.ParseAestasContents r [[new MentionEntity("@"+(cachedMembers 
+                    |> Array.find (fun m' -> m'.uid = m.uid)).name, m.uid)]] 
+            | AestasMention m::r, head::tail -> 
+                let at =
+                    new MentionEntity("@"+(cachedMembers 
+                        |> Array.find (fun m' -> m'.uid = m.uid)).name, m.uid)
+                this.ParseAestasContents r ((at::head)::tail)
+            | _ -> this.ParseAestasContents contents ((new TextEntity("not supported")::acc.Head)::acc.Tail)
         member val MessageCacheQueue = List<(IMessageAdapter -> unit)*uint32>() with get, set
-        override this.Send callback msgs = 
+        override this.Send callback contents = 
             async {
-                let msgs = msgs |> List.choose this.ParseAestasContent
-                let chain = (if private' then MessageBuilder.Friend(gid) else MessageBuilder.Group(gid)).Build()
-                // todo
-                chain.AddRange msgs
-                // return value is not useful in private chat
-                let! m = bot.SendMessage chain |> Async.AwaitTask
-                if private' then
-                    let ret = (messages, chain, SequenceIll) |> LagrangeMessage
-                    // s**t way to fix s**t thing
-                    // performance not good, comment it
-                    // async {
-                    //     Threading.Thread.Sleep 1500
-                    //     let! smsgs = bot.GetRoamMessage(chain, 5u) |> Async.AwaitTask
-                    //     let smsg =
-                    //         smsgs |> ArrList.tryFindBack (fun m -> 
-                    //             if m.FriendUin = self.uid then
-                    //                 if m.Count = chain.Count then
-                    //                     if m.ToPreviewText() = chain.ToPreviewText() then true else false
-                    //                 else false
-                    //             else false)
-                    //     let tmsgi = 
-                    //         (messages :> arrList<IMessageAdapter>) 
-                    //         |> ArrList.tryFindIndexBack (fun m -> m = ret)
-                    //     match smsg, tmsgi with
-                    //     | Some m, Some i ->
-                    //         messages[i] <- (messages, m, SequenceOk) |> LagrangeMessage :> IMessageAdapter
-                    //     | _ -> ()
-                    // } |> Async.Start
-                    callback ret
-                    return Ok ()
-                else 
-                    this.MessageCacheQueue.Add(callback, m.Sequence.Value)
+                let msgs = this.ParseAestasContents contents []
+                let chains = 
+                    msgs |> List.choose (function
+                    | [] -> None
+                    | x ->
+                        let chain = (if private' then MessageBuilder.Friend(gid) else MessageBuilder.Group(gid)).Build()
+                        x |> List.rev |> chain.AddRange
+                        Some chain)
+                    |> List.rev
+                match chains with
+                | [] -> return Error "Empty message"
+                | [chain] ->
+                    // return value is not useful in private chat
+                    let! m = bot.SendMessage chain |> Async.AwaitTask
+                    if private' then
+                        let ret = (messages, chain, SequenceIll) |> LagrangeMessage
+                        callback ret
+                        return Ok ()
+                    else 
+                        this.MessageCacheQueue.Add(callback, m.Sequence.Value)
+                        return Ok ()
+                | chain::rest ->
+                    // return value is not useful in private chat
+                    let! m = bot.SendMessage chain |> Async.AwaitTask
+                    if private' then
+                        let ret = (messages, chain, SequenceIll) |> LagrangeMessage
+                        callback ret
+                    else 
+                        this.MessageCacheQueue.Add(callback, m.Sequence.Value)
+                    for chain in rest do
+                        do! bot.SendMessage chain |> Async.AwaitTask |> Async.Ignore
                     return Ok ()
             }
         override this.Recall messageId =
@@ -167,7 +181,7 @@ module rec AestasLagrangeBot =
             member _.SenderId = cachedSender.uid
             member this.Parse() = {
                 sender = cachedSender
-                content = messageChain |> List.ofSeq |> collection.Domain.ParseLagrangeMessage
+                contents = messageChain |> List.ofSeq |> collection.Domain.ParseLagrangeMessage
                 mid = messageChain.MessageId
                 }
             member this.Mention uid = 
@@ -200,7 +214,7 @@ module rec AestasLagrangeBot =
                 sender = 
                     if messageChain.GroupUin.HasValue then parseLagrangeMember messageChain.GroupMemberInfo
                     else parseLagrangeFriend messageChain.FriendInfo
-                content = [messageChain.ToPreviewText() |> AestasText]
+                contents = [messageChain.ToPreviewText() |> AestasText]
                 mid = messageChain.MessageId
                 }
         end

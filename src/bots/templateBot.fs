@@ -26,8 +26,8 @@ type TemplateBot =
         static member Init _ =
             // initialize the model manually
             let model = GeminiLlm({
-                api_key = Some "Your api key here"
-                gcloudpath = None
+                apiKey = tryGetEnv "GEMINI_API_KEY"
+                gcloudPath = tryGetEnv "GCLOUD_PATH"
                 safetySettings = [|
                     {category = "HARM_CATEGORY_HARASSMENT"; threshold = "BLOCK_SOME"}
                     {category = "HARM_CATEGORY_HATE_SPEECH"; threshold = "BLOCK_SOME"}
@@ -35,10 +35,11 @@ type TemplateBot =
                     {category = "HARM_CATEGORY_DANGEROUS_CONTENT"; threshold = "BLOCK_SOME"}
                 |]
                 generation_configs = {
-                    temperature = 1.02
-                    maxLength = 4096
-                    topK = 64
-                    topP = 1.
+                    defaultGenerationConfig with
+                        temperature = Some 1.
+                        maxLength = Some 4096
+                        topK = Some 64
+                        topP = Some 1.
                 } |> Some
                 }, 
                 "gemini-1.5-flash")

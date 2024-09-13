@@ -86,7 +86,7 @@ module ObsoletedCommands =
             member _.AccessibleDomain = CommandAccessibleDomain.All
             member _.Privilege = CommandPrivilege.Normal
             member _.Execute env args =
-                env.log $"Aestas version {version}"; Unit
+                env.log $"Aestas version {version}\nLegacy Aestas Script"; Unit
     type DomainInfoCommand() =
         interface ICommand with
             member _.Name = "domaininfo"
@@ -158,7 +158,7 @@ module ObsoletedCommands =
                     if i > t then ()
                     else
                         let m = msgs[i].Parse()
-                        sb.Append $"\n* {m.sender.name}:\n   {m.content}\n  ({m.mid})" |> ignore
+                        sb.Append $"\n* {m.sender.name}:\n   {m.contents}\n  ({m.mid})" |> ignore
                         go (i+1)
                 go s
                 sb.ToString() |> env.log; Unit

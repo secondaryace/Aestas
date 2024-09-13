@@ -9,7 +9,7 @@ open System.Text.Unicode
 open System.Net.Http
 
 module Prim = 
-    let version = Version(0, 240901)
+    let version = Version(0, 240913)
     #if DEBUG
     let debug = true
     #else
@@ -303,3 +303,11 @@ module Prim =
         p.Kill()
         result
     [<Measure>] type sec
+    let inline getEnv s = 
+        match Environment.GetEnvironmentVariable s with 
+        | null -> failwith $"Environment variable {s} not found" 
+        | x -> x
+    let inline tryGetEnv s =
+        match Environment.GetEnvironmentVariable s with 
+        | null -> None
+        | x -> Some x

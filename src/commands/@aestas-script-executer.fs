@@ -32,7 +32,7 @@ module rec AestasScript =
             let ast = cmd.Trim() |> parse
             let ctx, ret = run {this.Context with binds = binds; print = env.log} ast
             this.Context <- ctx 
-            Logger.logInfo[0] (sprintf "ctx: %A" ctx)
+            //Logger.logInfo[0] (sprintf "ctx: %A" ctx)
             match ret with
             | Unit -> ()
             | x -> env.log x.Print

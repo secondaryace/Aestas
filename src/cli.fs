@@ -12,7 +12,7 @@ module Cli =
     let main(args) =
         AutoInit.initAll()
         Console.CursorVisible <- false
-        logInfo[0] "Console Started"
+        logInfof[0] "Console Started with args %A" args 
         logTrace[0] "Test0"
         logDebug[0] "Test1"
         logInfo[0] "Test2"
@@ -22,6 +22,23 @@ module Cli =
         let panel = PanelView(0, 0, Console.WindowWidth, Console.WindowHeight)
         TextView("Aestas", None, Console.WindowWidth-6, 0) |> panel.Append
         TextView("[TAB]", Some ConsoleColor.DarkGray, 21, 0) |> panel.Append
+        let mutable cachedLogOwners = getLoggerOwners()
+        let initLogsTab() = 
+            TabView(
+                cachedLogOwners
+                |> Array.map (
+                    fun o -> 
+                        toString o, 
+                        VerticalListView(getLogs o, logEntryDrawCursor, ConsoleKey.UpArrow, ConsoleKey.DownArrow, 
+                        0, 0, Console.WindowWidth, Console.WindowHeight-4) :> CliView)
+                |> arrList,
+                ConsoleKey.LeftArrow, ConsoleKey.RightArrow, 0, 0, Console.WindowWidth, Console.WindowHeight-2)
+        let mutable logsTab = initLogsTab()
+        let updateLogsTab() =
+            let newLogOwners = getLoggerOwners()
+            if cachedLogOwners.Length <> newLogOwners.Length then
+                cachedLogOwners <- newLogOwners
+                logsTab <- initLogsTab()
         let tab = TabView(arrList [|
             " Bots ", VerticalTabView(
                 AutoInit.bots
@@ -31,7 +48,7 @@ module Cli =
                     let p = PanelView(0, 0, Console.WindowWidth-13, Console.WindowHeight-2)
                     TextView($"""Model: {match b.Model with | Some model -> model.GetType().Name | None -> "None"}""", Some ConsoleColor.Gray, 0, 0)
                     |> p.Append
-                    DynamicObjectView(
+                    DynamicCursorView(
                         (fun () -> $"ReplyStrategy:          {b.MessageReplyStrategy}"), 
                         (fun s st -> setColor ConsoleColor.Gray; let ret = stringDrawCursor s st in resetColor(); ret),
                          0, 1, Console.WindowWidth-13, 1) |> p.Append
@@ -69,15 +86,8 @@ module Cli =
                     |> p.Append
                     p),
                 ConsoleKey.UpArrow, ConsoleKey.DownArrow, 0, 0, Console.WindowWidth, Console.WindowHeight-2, 13) :> CliView
-            " Logs ", TabView(
-                getLoggerOwners() 
-                |> Array.map (
-                    fun o -> 
-                        toString o, 
-                        VerticalListView(getLogs o, logEntryDrawCursor, ConsoleKey.UpArrow, ConsoleKey.DownArrow, 
-                        0, 0, Console.WindowWidth, Console.WindowHeight-4) :> CliView)
-                |> arrList,
-                ConsoleKey.LeftArrow, ConsoleKey.RightArrow, 0, 0, Console.WindowWidth, Console.WindowHeight-2)
+            " Logs ", DynamicObjectView(
+                (fun () -> logsTab), 0, 0, Console.WindowWidth, Console.WindowHeight-2) :> CliView
         |], ConsoleKey.BrowserBack, ConsoleKey.Tab, 0, 0, Console.WindowWidth, Console.WindowHeight)
         tab |> panel.Append
         let mutable draw = false
@@ -85,6 +95,7 @@ module Cli =
             if draw then () else
             draw <- true
             try
+                if tab.Index = 2 then updateLogsTab()
                 clear()
                 panel.Draw()
             with ex ->

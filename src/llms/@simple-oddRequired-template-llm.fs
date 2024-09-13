@@ -33,10 +33,10 @@ module SimpleOddRequiredTemplateLlm =
                 if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList())
                 if contentsCache[domain].Count <> 0 && (fst' (contentsCache[domain][^0])).Role = userRole then
                     contentsCache[domain][^0] <- 
-                        (fst' (contentsCache[domain][^0])).Bind (fun x -> $"{x}\n{message.content |> buildMessageString domain}") :?> 'message,
+                        (fst' (contentsCache[domain][^0])).Bind (fun x -> $"{x}\n{message.contents |> buildMessageString domain}") :?> 'message,
                         snd' (contentsCache[domain][^0])
                 else
-                    contentsCache[domain].Add(message.content |> buildMessageString domain |> messageCtor bot domain userRole, message.mid)
+                    contentsCache[domain].Add(message.contents |> buildMessageString domain |> messageCtor bot domain userRole, message.mid)
             member this.RemoveCache domain messageId = 
                 match
                     contentsCache[domain] |>
@@ -61,12 +61,12 @@ module SimpleOddRequiredTemplateLlm =
                         fun msg ->
                             match contentsCache[domain] |> ArrList.tryFindIndexBack (fun struct(_, x) -> x = cachedMid) with
                             | Some i ->
-                                contentsCache[domain].Insert(i+1, struct(msg.content |> buildMessageString domain |> messageCtor bot domain modelRole, msg.mid))
+                                contentsCache[domain].Insert(i+1, struct(msg.contents |> buildMessageString domain |> messageCtor bot domain modelRole, msg.mid))
                             | None ->
                                 match contentsCache[domain] |> ArrList.tryFindIndexBack (fun struct(m, _) -> m.Role = userRole) with
                                 | Some i -> 
                                     contentsCache[domain].Insert(i+1, 
-                                        struct(msg.content |> buildMessageString domain |> messageCtor bot domain modelRole, msg.mid))
+                                        struct(msg.contents |> buildMessageString domain |> messageCtor bot domain modelRole, msg.mid))
                                 | None -> failwith "Bad condition"
                     else return Error "Failed", ignore
                 }
