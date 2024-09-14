@@ -10,8 +10,6 @@ open Aestas.Core
 open Aestas.AutoInit
 open Aestas.Prim
 
-open StbVorbisSharp
-
 module MsTts =
     type MsTts_Profile = {subscriptionKey: string; subscriptionRegion: string; voiceName: string; outputFormat: string; styles: string list}
     let inline private getMime s =
@@ -25,8 +23,8 @@ module MsTts =
         match s with
         | "ogg-16khz-16bit-mono-opus"
         | "ogg-24khz-16bit-mono-opus"
-        | "ogg-48khz-16bit-mono-opus" -> 2
-        | _ -> 2
+        | "ogg-48khz-16bit-mono-opus" -> 5
+        | _ -> 5
     let getVoice (profile: MsTts_Profile) (content: (string*string) list) =
         let url = $"https://{profile.subscriptionRegion}.tts.speech.microsoft.com/cognitiveservices/v1"
         use web = new HttpClient()
@@ -51,7 +49,6 @@ module MsTts =
         let content = 
             new StringContent(ssmlBuilder.ToString(), Encoding.UTF8, "application/ssml+xml")
         Logger.logInfo[0] (ssmlBuilder.ToString())
-        content.Headers.ContentType <- MediaTypeHeaderValue("application/ssml+xml")
         let response = web.PostAsync("", content).Result
         if response.IsSuccessStatusCode then
             response.Content.ReadAsByteArrayAsync().Result |> Ok
