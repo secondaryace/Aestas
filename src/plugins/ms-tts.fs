@@ -1,5 +1,4 @@
-﻿//! nuget StbVorbisSharp=1.22.4
-namespace Aestas.Plugins
+﻿namespace Aestas.Plugins
 open System
 open System.IO
 open System.Net.Http
@@ -26,10 +25,8 @@ module MsTts =
         match s with
         | "ogg-16khz-16bit-mono-opus"
         | "ogg-24khz-16bit-mono-opus"
-        | "ogg-48khz-16bit-mono-opus" -> 
-            let vorbis = Vorbis.FromMemory data
-            int(vorbis.LengthInSeconds)
-        | _ -> 0
+        | "ogg-48khz-16bit-mono-opus" -> 2
+        | _ -> 2
     let getVoice (profile: MsTts_Profile) (content: (string*string) list) =
         let url = $"https://{profile.subscriptionRegion}.tts.speech.microsoft.com/cognitiveservices/v1"
         use web = new HttpClient()
