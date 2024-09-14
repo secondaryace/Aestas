@@ -132,17 +132,17 @@ module Gemini =
                     | Ok result -> 
                         let response = 
                             try
-                            match jsonDeserialize<GResponse>(result).candidates[0].content.parts[0] with
-                            | Text t -> t.text.Replace("\n\n", "\n")
-                            | InlineData _ -> ""
+                                match jsonDeserialize<GResponse>(result).candidates[0].content.parts[0] with
+                                | Text t -> t.text.Replace("\n\n", "\n")
+                                | InlineData _ -> ""
                             with ex -> 
-                                logError[0] $"Gemini response parse failed: {ex}, {response}"
+                                logErrorf[0] "Gemini response parse failed: %A, %s" ex result
                                 "..."
                         return response.TrimEnd() |> Builtin.modelOutputParser bot domain |> Ok, 
                         fun msg -> 
                             contentsCache[domain].Insert(countCache, struct({role = "model"; parts = [|Text {text = response}|]}, msg.mid))
                     | Error result ->
-                        logError[0] $"Gemini request failed: {result}" 
+                        logErrorf[0] "Gemini response failed: %s" result
                         return Error result, ignore
                 }
             member _.ClearCache domain = if contentsCache.ContainsKey domain then contentsCache[domain].Clear()

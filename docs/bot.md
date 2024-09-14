@@ -15,7 +15,7 @@ module MyFirstBot = //可选的，模块并不会影响Bot的加载
     type MyFirstBotInitializer() =
         interface IAutoInit<MyFirstBot, unit> with
             member this.Init() =
-                let bot = AestasBot()
+                let bot = createBotShort "MyFirstBot" // 创建一个名为MyFirstBot的Bot
                 // 在下面的教程中给出的代码实际上写在这里，而不是下两行的位置
                 bot // 在F#中，最后一个表达式的值就相当于返回值
 ```
@@ -28,47 +28,50 @@ Aestas比较特殊的一点是，它不需要我们编写一个配置文件。�
 Aestas使用F#，并不具有动态语言的热重载功能，每当你增加一个功能都必须要重新编译，而且F#的编译速度很慢。但假如我们能通过IDE和编译器、类型系统来找出大多数错误，也就不需要频繁地去编译和手动重启。当然事实上用TypeScript和Python还是会更快乐一些，Aestas用F#主打一个函数式编程的新奇体验，运行速度或许也比脚本语言做的框架快一些。
 ```fsharp
                 let model = GeminiLlm({
-                    api_key = Some "{这里填写你的API key}" // Some代表F#中的option，代表这个值是确定有值的可空值，参考python的Optional，C#的Nullable
-                    gcloudpath = None // 这里填写你的gcloud路径，如果你不知道这是什么，就填None
-                    safetySettings = [|
-                        {category = "HARM_CATEGORY_HARASSMENT"; threshold = "BLOCK_SOME"}
-                        {category = "HARM_CATEGORY_HATE_SPEECH"; threshold = "BLOCK_SOME"}
-                        {category = "HARM_CATEGORY_SEXUALLY_EXPLICIT"; threshold = "BLOCK_SOME"}
-                        {category = "HARM_CATEGORY_DANGEROUS_CONTENT"; threshold = "BLOCK_SOME"}
-                    |] // 如果没有特殊需求，只需要照抄
-                    generation_configs = ["gemini-1.5-flash-latest", {
-                        temperature = 1.0
-                        max_length = 4096
-                        top_k = 64
-                        top_p = 1.
-                    }] |> dict |> Some // 如果没有特殊需求，只需要照抄
-                    }, true) // 最后的true代表使用Gemini1.5的Flash模型，false则使用Pro模型
-                bot.Model <- Some model // 将模型绑定到Bot上
+                apiKey = Some "{这里填写你的API key}" // Some代表F#中的option，代表这个值是确定有值的可空值，参考python的Optional，C#的Nullable
+                gcloudPath = tryGetEnv "GCLOUD_PATH" // 这里填写gcloud路径，这里使用环境变量，不存在这个变量会设置为None
+                safetySettings = [|
+                    {category = "HARM_CATEGORY_HARASSMENT"; threshold = "BLOCK_SOME"}
+                    {category = "HARM_CATEGORY_HATE_SPEECH"; threshold = "BLOCK_SOME"}
+                    {category = "HARM_CATEGORY_SEXUALLY_EXPLICIT"; threshold = "BLOCK_SOME"}
+                    {category = "HARM_CATEGORY_DANGEROUS_CONTENT"; threshold = "BLOCK_SOME"}
+                |] // 如果没有特殊需求，只需要照抄
+                generation_configs = {
+                    defaultGenerationConfig with // 这是F#的record表达式，在提供的默认配置上修改
+                        temperature = Some 1.
+                        maxLength = Some 4096
+                        topK = Some 64
+                        topP = Some 1.
+                } |> Some
+                }, 
+                "gemini-1.5-flash") // 最后的字符串代表使用Gemini1.5的Flash模型，"gemini-1.5-pro"则使用Pro模型
+                model |> bindModel bot // 将模型绑定到Bot上
+                // |> 是F#中的管道运算符，x |> f 等价于 f x
 ```
 这样就让你的Bot拥有了一个可以用来对话的模型，但我们目前还没有和Bot对话的手段，所以我们将Bot绑定到域（`AestasDomain`）上。
 为了测试，我们使用控制台域，这样我们就可以在控制台上和Bot对话。
 ```fsharp
-                ConsoleBot.singleton.InitDomainView(bot, 0u) |> bot.BindDomain // 0u是控制台域的域ID，它可能且仅可能是0
-                // |> 是F#中的管道运算符，x |> f 等价于 f x
+                ConsoleBot.singleton.InitDomainView(bot, 0u) |> bindDomain bot // 0u是控制台域的域ID，它可能且仅可能是0
+                // u代表了uint32，是F#中的无符号32位整数
 ```
 这样下来，我们就可以在控制台上和Bot对话。在正常情况下，我们会将Bot绑定到一个真实的聊天软件的群聊/私聊上，我们统称其为一种域视图，简称域。事实上的同一个群聊可以对应不同的域，因为在每个Bot眼里它们的表现都可以是不同的。因此域是一个仅对于单个Bot有意义的概念。大多数情况下对域的绑定也是一次性的，Bot不会将域解绑。在Aestas的基础上当然可以实现动态加/退群聊，但我并没有维护这个的动力。
 #### 修改Bot的属性
-如果你按上面的步骤创建了一个Bot，你会发现你的Bot的名字叫`AestasBot`，这是因为我们没有给Bot命名。我们可以给Bot命名：
-```fsharp
-                bot.Name <- "MyFirstBot" // 这里填写你的Bot名字
 ```
 在大多时候，我们会想要给模型一个系统提示，我们可以为Bot设置一个系统提示：
 ```fsharp
-                bot.SystemInstruction <- "你好，我是MyFirstBot，我可以回答你的问题。" // 这里填写你的系统提示
+                "你好，我是MyFirstBot，我可以回答你的问题。" |> addSystemInstruction bot // 这里填写你的系统提示
 ```
 在所绑定的模型获取系统提示时，也说通过`bot.SystemInstruction`，注意这并非一个字段，而是属性。
-`bot.SystemInstructionBuilder`是一个`SystemInstructionBuilder option`类型的属性，默认为`None`，而`SystemInstructionBuilder`是类型`AestasBot -> string -> string`的别名。这意味着你可以这样设置`bot.SystemInstructionBuilder`：
+`bot.SystemInstructionBuilder`是一个`PipeLineChain<AestasBot * StringBuilder> option`类型的属性，默认为`None`，你可以这样设置`bot.SystemInstructionBuilder`：
 ```fsharp
-                bot.SystemInstructionBuilder <- Some (fun bot instruction -> $"[Time is:{System.DateTime.Now}]\n{instruction}")
+                (fun (bot, stringBuilder) -> $"[Time is:{System.DateTime.Now}]" |> stringBuilder.Append |> ignore)
+                |> addSystemInstructionBuilder bot
 ```
 这样，获取到的系统提示的结果就会变为类似
 ```
-[Time is:2024/8/1 0:12:34]
 你好，我是MyFirstBot，我可以回答你的问题。
+[Time is:2024/8/1 0:12:34]
 ```
-而不影响原来设置的系统提示的内容。
+不影响原来设置的系统提示的内容。
+
+`StringBuilder`是.NET中的类，如果熟悉C#，你可能会知道它的用法。`AestasBot * StringBuilder`实际上是一个ADT（代数数据类型）样式的元组类型，在C#看来是这样：`Tuple<AestasBot, StringBuilder>`。`PipeLineChain<>`实际上只是将一些函数组合在一起链式调用的类，定义很简单。

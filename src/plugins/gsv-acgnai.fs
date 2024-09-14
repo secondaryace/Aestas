@@ -81,7 +81,7 @@ module Gsv_Acgnai =
                     match bot.TryGetExtraData("gsv") with
                     | Some (:? Gsv_Acgnai_Profile as profile) -> 
                         let voice = params'.Head |> getVoice profile
-                        AestasAudio(voice, "audio/wav") |> Ok
+                        AestasAudio(voice, "audio/wav", 2) |> Ok
                     | _ -> Error "Couldn't find gsv data"
                 , fun bot builder ->
                     """You may send voice messages like #[gsvVoice@emotion=content].

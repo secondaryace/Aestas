@@ -1,4 +1,5 @@
 //This lexer has been writen with help of "Real world OCaml" book By Yaron Minsky, Anil Madhavapeddy, Jason Hickey (chapter 16)
+//see: https://github.com/fsprojects/FsLexYacc/blob/94f96a3ded28019e9376c985e3465d25d9a8a80e/tests/fsyacc/unicode/test1-unicode-lex.fsl
 {
 
 module Aestas.Commands.Compiler.Lexer
@@ -16,12 +17,22 @@ let newline (lexbuf: LexBuffer<_>) =
   lexbuf.StartPos <- lexbuf.StartPos.NextLine
 }
 
-let int = ['-' '+']? ['0'-'9']+
-let digit = ['0'-'9']
+let digit = '\Nd'
+let letter = '\Lu' | '\Ll' | '\Lm' | '\Lo' | '\Nl'
+
 let frac = '.' digit*
 let exp = ['e' 'E'] ['-' '+']? digit+
 let float = digit* frac? exp?
-let id = ( ('-'|"--")? ['_' 'A'-'Z' 'a'-'z'] ['_' 'A'-'Z' 'a'-'z' '0'-'9']* )|('@' digit+)
+
+let ident_start = letter | '_'  | '@'
+
+let connecting_char = '\Pc'
+let combining_char = '\Mn' | '\Mc'
+let formatting_char = '\Cf' 
+let ident_char = letter | digit | connecting_char | combining_char | formatting_char
+
+let id = ('-' | "--")? ident_start ident_char* 
+
 let op_0 = ['+' '-']
 let op_1 = ['*' '/']
 
@@ -39,9 +50,9 @@ rule read =
   | "if"     { IF }
   | "then"   { THEN }
   | "else"   { ELSE }
-  | id       { ID (string (lexeme lexbuf))}
   | op_0     { BINOP_0 (string (lexeme lexbuf)) }
   | op_1     { BINOP_1 (string (lexeme lexbuf)) }
+  | id       { ID (string (lexeme lexbuf))}
   | float    { NUMBER (float (lexeme lexbuf)) }
   | '='      { EQUAL }
   | "->"     { RIGHT_ARROW }
@@ -56,6 +67,7 @@ rule read =
   | ','      { COMMA }
   | '^'      { POWER }
   | '|'      { PIPE }
+  | "..."    { TAILPATTERN }
   | '.'      { DOT }
   | eof      { EOF }
   | _ { raise (Exception (sprintf "SyntaxError: Unexpected char: '%s' Line: %d Column: %d" (lexeme lexbuf) (lexbuf.StartPos.Line + 1) lexbuf.StartPos.Column)) }

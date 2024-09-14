@@ -56,7 +56,7 @@ module rec AestasLagrangeBot =
             match entity with
             | :? TextEntity as t -> AestasText t.Text
             | :? ImageEntity as i -> AestasImage (i.ImageUrl |> bytesFromUrl, "image/jpeg", int i.PictureSize.X, int i.PictureSize.Y)
-            | :? RecordEntity as a -> AestasAudio (a.AudioUrl |> bytesFromUrl, "audio/amr")
+            | :? RecordEntity as a -> AestasAudio (a.AudioUrl |> bytesFromUrl, "audio/amr", a.AudioLength)
             | :? VideoEntity as v -> AestasVideo (v.VideoUrl |> bytesFromUrl, "") 
             | :? MentionEntity as m -> 
                 AestasMention {uid = m.Uin; name = m.Name.Substring(1)}
@@ -64,7 +64,7 @@ module rec AestasLagrangeBot =
                 match messages 
                     |> ArrList.tryFindBack (fun m -> (m :?> LagrangeMessage).Sequence = f.Sequence) with
                 | Some m -> AestasQuote m.MessageId
-                | None -> AestasText "#[quote not found]"
+                | None -> AestasText "#[quote: not found]"
             | _ -> AestasText "not supported"
         member this.ParseLagrangeMessage (entities: IMessageEntity list) =
             match entities with
@@ -75,8 +75,8 @@ module rec AestasLagrangeBot =
             match contents, acc with
             | [], acc -> acc
             | AestasBlank::r, _ ->  this.ParseAestasContents r acc
-            | AestasAudio (bs, mime)::r, _ -> 
-                this.ParseAestasContents r ([new RecordEntity(bs)]::acc)
+            | AestasAudio (bs, mime, duration)::r, _ -> 
+                this.ParseAestasContents r ([new RecordEntity(bs, duration)]::acc)
             | AestasVideo (bs, mime)::r, _ -> 
                 this.ParseAestasContents r ([new VideoEntity(bs)]::acc)
             | AestasText t::r, [] ->

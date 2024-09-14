@@ -10,6 +10,7 @@ type token =
   | COLON
   | RIGHT_ARROW
   | EQUAL
+  | TAILPATTERN
   | BINOP_1 of (string)
   | BINOP_0 of (string)
   | PIPE
@@ -39,6 +40,7 @@ type tokenId =
     | TOKEN_COLON
     | TOKEN_RIGHT_ARROW
     | TOKEN_EQUAL
+    | TOKEN_TAILPATTERN
     | TOKEN_BINOP_1
     | TOKEN_BINOP_0
     | TOKEN_PIPE

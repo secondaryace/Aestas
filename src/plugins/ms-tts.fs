@@ -1,4 +1,5 @@
-﻿namespace Aestas.Plugins
+﻿//! nuget StbVorbisSharp=1.22.4
+namespace Aestas.Plugins
 open System
 open System.IO
 open System.Net.Http
@@ -10,8 +11,25 @@ open Aestas.Core
 open Aestas.AutoInit
 open Aestas.Prim
 
+open StbVorbisSharp
+
 module MsTts =
     type MsTts_Profile = {subscriptionKey: string; subscriptionRegion: string; voiceName: string; outputFormat: string; styles: string list}
+    let inline private getMime s =
+        match s with
+        | "ogg-16khz-16bit-mono-opus"
+        | "ogg-24khz-16bit-mono-opus"
+        | "ogg-48khz-16bit-mono-opus" -> "audio/ogg"
+        | "amr-wb-16000hz" -> "audio/amr-wb"
+        | _ -> "audio/mp3"
+    let inline private getDuration s data =
+        match s with
+        | "ogg-16khz-16bit-mono-opus"
+        | "ogg-24khz-16bit-mono-opus"
+        | "ogg-48khz-16bit-mono-opus" -> 
+            let vorbis = Vorbis.FromMemory data
+            int(vorbis.LengthInSeconds)
+        | _ -> 0
     let getVoice (profile: MsTts_Profile) (content: (string*string) list) =
         let url = $"https://{profile.subscriptionRegion}.tts.speech.microsoft.com/cognitiveservices/v1"
         use web = new HttpClient()
@@ -50,7 +68,7 @@ module MsTts =
                     match bot.TryGetExtraData("mstts") with
                     | Some (:? MsTts_Profile as profile) -> 
                         match params' |> List.rev |> getVoice profile with
-                        | Ok voice -> AestasAudio(voice, "audio/ogg") |> Ok
+                        | Ok voice -> AestasAudio(voice, getMime profile.outputFormat, getDuration profile.outputFormat voice) |> Ok
                         | Error emsg -> Error emsg
                     | _ -> Error "Couldn't find mstts data"
                 , fun bot builder ->

@@ -30,7 +30,8 @@ module PythonRunner =
         static let run code callback =
             let thread = new Thread(fun () -> (
                 try
-                    Thread.Sleep 200
+                    // sleep 2s, let the bot send their message first
+                    Thread.Sleep 2000
                     use gil = Py.GIL()
                     use scope = Py.CreateScope()
                     let io = scope.Import("io", "io")

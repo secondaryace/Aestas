@@ -1,6 +1,4 @@
 #!/bin/bash
-#!/bin/bash
-
 target="$1"
 
 if [ "$target" = "build" ]; then

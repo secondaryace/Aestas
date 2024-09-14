@@ -1,2 +1,2 @@
 @echo off
-pwsh .\aestas.ps1
+pwsh .\aestas.ps1 %*

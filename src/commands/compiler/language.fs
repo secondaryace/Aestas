@@ -10,6 +10,7 @@ type Ast =
     | Bool of bool
     | Number of float
     | Identifier of string
+    | TailPattern of string
     | Unit
     member this.Print with get() = Ast.Display this
     static member Display ast =
@@ -35,6 +36,7 @@ type Ast =
         | Bool b -> string b
         | Number f -> string f
         | Identifier s -> s
+        | TailPattern s -> sprintf "%s..." s
         | Unit -> "()"
 // module JsonParsing 
 //     type JsonValue = 

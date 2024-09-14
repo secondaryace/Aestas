@@ -1,24 +1,30 @@
-## Aestas内置指令
-#### 语法定义
-```ebnf
-command     = { tuple ( ";" [ newline ] ) | newline } tuple;
-tuple       = { expr "," } expr;
-expr        = field | call | listLit | tuple | objectLit | pipeline | atom;
-field       = expr "." identifier;
-tupleLit    = { atom "^" } atom;
-listLit     = "[" { expr "" } expr "]";
-objectLit   = "{" { key "=" expr "" } key ":" expr "}";
-call        = expr "space" atom { "space" atom  } | binOp atom atom (* sugar, make call like "ls" valid *)
-pipeline    = expr "|" expr;
-atom        = number | string | identifier | "(" expr ")";
+## 进阶-指令系统
+Aestas其实将指令系统抽象为`CommandExecuter`，可以注入各种各样的指令系统到Bot中，其中的指令是自己实现的。
+### AestasScript
+绑定值：
+```fsharp
+let x = 1
 ```
+绑定函数：
+```fsharp
+let f x y = + x y
+let mutilineFunc x y = (
+    let z = + x y
+    let z = + z y
+    z
+)
+```
+函数调用：
+```fsharp
+f 1 2
+```
+前缀表达式的运算符：
+```fsharp
++ 1 2
+```
+中缀表达式的运算符：
 
-#### 例子
-```
-lsdomain | map (lambda x x.name); (* list all domains *) | echo
-lsdomain | filter (lambda x (eq x.name "test")) | echo
-let f (lambda x y (add x y))
-let g (lambda x^y (add x y))
-f 1 2 | echo
-g 1^2 | echo
+*中间不可以有空格*
+```fsharp
+1+2
 ```

@@ -197,7 +197,8 @@ type AestasContent =
     | AestasText of string 
     /// byte array, mime type, width, height
     | AestasImage of byte[]*string*int*int
-    | AestasAudio of byte[]*string
+    /// byte array, mime type, duration in seconds
+    | AestasAudio of byte[]*string*int
     | AestasVideo of byte[]*string
     | AestasMention of AestasChatMember
     | AestasQuote of uint64
@@ -979,7 +980,7 @@ module Builtin =
     let overridePrimCtor = dict' [
         "text", fun (domain: AestasChatDomain, param: (string*string) list, content) -> AestasText content
         "image", fun (domain, param, content) -> AestasImage (Array.zeroCreate<byte> 0, "image/png", 0, 0)
-        "audio", fun (domain, param, content) -> AestasAudio (Array.zeroCreate<byte> 0, "audio/wav")
+        "audio", fun (domain, param, content) -> AestasAudio (Array.zeroCreate<byte> 0, "audio/wav", 0)
         "video", fun (domain, param, content) -> AestasVideo (Array.zeroCreate<byte> 0, "video/mp4")
         "mention", fun (domain, param, content) ->
             let content = content.Trim()
@@ -1001,6 +1002,9 @@ module Builtin =
                 cache.Append(botOut[i]) |> ignore
                 scanParam (i+1) r
         // state index bracketLevel funcName param
+        // state 0 -> funcName
+        // state 1 -> param
+        // state 2 -> content
         let rec scanBracket s i v f p =
             match botOut[i] with
             | '@' when s = 0 ->
@@ -1015,8 +1019,9 @@ module Builtin =
                 let f = if cache.Length <> 0 then cache.ToString() else f
                 cache.Clear() |> ignore
                 scanBracket 2 (i+1) v f p
+            | ']' when v = 1 && s = 0 -> i+1, cache.ToString(), p, "", cache.Clear() |> ignore
             | ']' when v = 1 -> i+1, f, p, cache.ToString(), cache.Clear() |> ignore
-            // ignore nested square brackets
+            // nested square brackets
             | '[' -> 
                 cache.Append '[' |> ignore
                 scanBracket s (i+1) (v+1) f p
@@ -1166,6 +1171,9 @@ module Builtin =
             helpCommand()
         ]
 module BotHelper =
+    let inline tryGetModel (bot: AestasBot) = bot.Model
+    let inline bindModel (bot: AestasBot) model =
+        bot.Model <- Some model
     let inline bindDomain (bot: AestasBot) domain =
         bot.BindDomain domain
     let inline addExtraData (bot: AestasBot) (key: string) (value: obj) =
@@ -1195,7 +1203,9 @@ module BotHelper =
     let inline addSystemInstruction (bot: AestasBot) systemInstruction =
         bot.SystemInstruction <- systemInstruction
     let inline addSystemInstructionBuilder (bot: AestasBot) systemInstructionBuilder =
-        bot.SystemInstructionBuilder <- Some systemInstructionBuilder
+        match bot.SystemInstructionBuilder with
+        | None -> bot.SystemInstructionBuilder <- systemInstructionBuilder |> PipeLineChain.singleton |> Some
+        | Some x -> x.Bind systemInstructionBuilder
     let inline updateSystemInstruction (bot: AestasBot) systemInstruction =
         bot.SystemInstruction <- systemInstruction
     let inline updateSystemInstructionBuilder (bot: AestasBot) systemInstructionBuilder =
@@ -1232,8 +1242,7 @@ module BotHelper =
         | Some x -> x |> List.iter (fun (uid, privilege) -> bot.MemberCommandPrivilege.Add(uid, privilege))
         | _ -> ()
         bot
-    let inline createBotShort name model =
+    let inline createBotShort name  =
         let bot = AestasBot()
         bot.Name <- name
-        bot.Model <- Some model
         bot

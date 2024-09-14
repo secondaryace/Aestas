@@ -10,6 +10,7 @@ type Value =
     | Tuple of Value list
     | Unit
     | Wildcard
+    | TupleTail
     | FSharpFunction of (Context -> Value list -> (Context * Value))
     member this.Print with get() = Value.Display this
     static member Display value =
@@ -17,6 +18,7 @@ type Value =
         | String s -> sprintf "\"%s\"" s
         | Flag s -> if s.Length = 1 then sprintf "-%s" s else sprintf "--%s" s
         | Wildcard -> "_"
+        | TupleTail -> "..."
         | Bool b -> string b
         | Number f -> string f
         | Function (params', asts) ->
@@ -31,12 +33,16 @@ type Context = {
     binds: Map<string, Value>
     args: Map<string, Value>
     print: string -> unit
+    trace: string list
 } 
     with
         member this.Print with get() = Context.Display this
         static member Display context =
             let mapString map = Map.fold (fun s id v -> s+sprintf "\n    %s = %A" id v) "" map
             sprintf "binds: %s\nargs: %s" (mapString context.binds) (mapString context.args) 
+exception AestasScriptException of string*string list
+let inline failwithtf t fmt = Printf.kprintf (fun s -> AestasScriptException(s, t) |> raise) fmt
+let inline failwitht t s = AestasScriptException(s, t) |> raise 
 module Prim =
     let eq ctx args =
         ctx,
@@ -56,11 +62,13 @@ module Prim =
             let rec go a b =
                 match a, b with
                 | [], [] -> true
-                | h::t, h'::t' -> match Prim.eq ctx [h; h'] |> snd with Bool true -> go t t' | _ -> false
+                | [TupleTail], _ -> true
+                | _, [TupleTail] -> true
+                | h::t, h'::t' -> match eq ctx [h; h'] |> snd with Bool true -> go t t' | _ -> false
                 | _, _ -> false
             Bool (go a b)
         | [_; _] -> Bool false
-        | _ -> failwithf "Couldn't apply %A to '='" args
+        | _ -> failwithtf ctx.trace "Couldn't apply %A to '='" args
     let rec calc s ctx args =
         ctx, 
         match s, args with
@@ -68,12 +76,14 @@ module Prim =
         | "or", [Bool a; Bool b] -> Bool (a||b)
         | "+", [Number a; Number b] -> Number (a+b)
         | "-", [Number a; Number b] -> Number (a-b)
+        | "+", [Unit; x] -> x
+        | "+", [x; Unit] -> x
         | "+", [Number a] -> Number (a)
         | "-", [Number a] -> Number (-a)
         | "*", [Number a; Number b] -> Number (a*b)
         | "/", [Number a; Number b] -> Number (a/b)
         | "+", [String a; String b] -> String (a+b)
-        | _, _ -> failwithf "Couldn't apply %A to %s" args s
+        | _, _ -> failwithtf ctx.trace "Couldn't apply %A to %s" args s
     let map ctx args =
         match args with
         | [f; Tuple vs] -> 
@@ -83,8 +93,27 @@ module Prim =
                 let ctx, v = exec ctx f [h]
                 go ctx (v::acc) t
             go ctx [] vs
-        | _ -> failwith "Invalid Arguments"
-    
+        | _ -> failwitht ctx.trace "Invalid Arguments"
+    let id ctx args = match args with [x] -> ctx, x | _ -> failwitht ctx.trace "Invalid"
+    let type' ctx args =
+        ctx, 
+        String (
+            let rec getType = function
+            | String _ -> "string"
+            | Flag _ -> "flag"
+            | Wildcard -> "_"
+            | Bool _ -> "bool"
+            | Number _ -> "number"
+            | Function _ -> "function"
+            | Tuple ts -> sprintf "tuple<%s>" (ts |> List.map getType |> String.concat ", ")
+            | TupleTail -> "tuple"
+            | Unit -> "unit"
+            | FSharpFunction _ -> "fsharpfunction"
+            match args with
+            | [x] -> getType x
+            | _ -> failwithf "Invalid type %A" args
+        )
+
     let operators = Map.ofList [
         "+", calc "+" |> FSharpFunction
         "-", calc "-" |> FSharpFunction
@@ -93,26 +122,9 @@ module Prim =
         "=", FSharpFunction eq
         "and", calc "and" |> FSharpFunction
         "or", calc "or" |> FSharpFunction
-        "id", FSharpFunction (fun ctx args -> match args with [x] -> ctx, x | _ -> failwith "Invalid")
+        "id", FSharpFunction id
         "^", FSharpFunction (fun ctx args -> ctx, Tuple args)
-        "type", FSharpFunction (fun ctx args -> 
-            ctx, 
-            String (
-                let rec getType = function
-                | String _ -> "string"
-                | Flag _ -> "flag"
-                | Wildcard -> "_"
-                | Bool _ -> "bool"
-                | Number _ -> "number"
-                | Function _ -> "function"
-                | Tuple ts -> sprintf "tuple<%s>" (ts |> List.map getType |> String.concat ", ")
-                | Unit -> "unit"
-                | FSharpFunction _ -> "fsharpfunction"
-                match args with
-                | [x] -> getType x
-                | _ -> failwithf "Invalid type %A" args
-            )
-        )
+        "type", FSharpFunction type'
         "map", FSharpFunction map
         "print", FSharpFunction (fun ctx args -> 
             sprintf "%s\n" (List.map (function String s -> s | x -> string x) args |> String.concat " ") 
@@ -129,12 +141,17 @@ module Prim =
             ctx, Unit
         )
     ]
-let makeContext binds args print = {binds = binds; args = args ; print = print}
+let makeContext binds args print trace = {
+    binds = binds
+    args = args
+    print = print
+    trace = trace
+    }
 let run (ctx: Context) (asts: Ast list) =
     match asts with
     | [Call (Identifier x, [])] -> 
         match Map.tryFind x ctx.binds with
-        | None -> failwith ""
+        | None -> failwitht ctx.trace "Function not found"
         | Some x ->
             exec ctx x []
     | _ ->
@@ -146,9 +163,10 @@ let run (ctx: Context) (asts: Ast list) =
             go ctx t
         go ctx asts
 let bindValue (ctx: Context) (id: string) v =
-    if id.StartsWith '-' then failwith "Invalid identifier" 
+    if id.StartsWith '-' then failwitht ctx.trace "Invalid identifier" 
     elif id = "_" then ctx.binds
     else
+        let id = if id.StartsWith "@" then id[1..] else id
         if Map.containsKey id ctx.binds then Map.change id (fun _ -> Some v) ctx.binds else Map.add id v ctx.binds
 let rec tuple (ctx: Context) (ast: Ast) =
     match ast with
@@ -169,10 +187,11 @@ let rec expr (ctx: Context) (ast: Ast) =
         | Ast.Tuple tree, Tuple vtree ->
             let rec go ctx = function
             | [], [] -> ctx
+            | [TailPattern id], ls -> matching ctx (Identifier id, Tuple ls)
             | h::t, h'::t' -> go (matching ctx (h, h')) (t, t')
-            | l, l' -> failwithf "Matching failed: (%A) -x> (%A)" l l'
+            | l, l' -> failwithtf ctx.trace "Matching failed: (%A) -x> (%A)" l l'
             go ctx (tree, vtree)
-        | pattern, value -> failwithf "Matching failed: (%A) -x> (%A)" pattern value
+        | pattern, value -> failwithtf ctx.trace "Matching failed: (%A) -x> (%A)" pattern value
         let ctx, value = run ctx lines
         matching ctx (pattern, value), Unit
     | Lambda (plist, lines) -> ctx, Function(plist, lines)
@@ -194,27 +213,28 @@ let rec expr (ctx: Context) (ast: Ast) =
         | Bool false, _ ->
             let ctx, vbrFalse = run ctx brFalse
             ctx, vbrFalse
-        | _ -> failwith "Condition should be bool"
+        | _ -> failwitht ctx.trace "Condition should be bool"
     | Ast.String s -> ctx, String s
     | Ast.Bool b -> ctx, Bool b
     | Ast.Number f -> ctx, Number f
+    | Ast.Unit -> ctx, Unit
     | Identifier id -> 
-        ctx, 
-        if id = "_" then Wildcard
-        elif id.StartsWith "--" then Flag id[2..]
-        elif id.StartsWith '-' && id <> "-" then Flag id[1..]
+        if id = "_" then ctx, Wildcard
+        elif id.StartsWith "--" then ctx, Flag id[2..]
+        elif id.StartsWith '-' && id <> "-" then ctx, Flag id[1..]
         elif id.StartsWith '@' then
             match Map.tryFind id[1..] ctx.args with
-            | None -> Unit
-            | Some x -> x
+            | None -> { ctx with trace = sprintf "Name %s is not defined" id::ctx.trace }, Unit
+            | Some x -> ctx, x
+        elif id = "..." then ctx, TupleTail
         else
             match Map.tryFind id ctx.args with
             | None -> 
                 match Map.tryFind id ctx.binds with
-                | None -> Unit 
-                | Some x -> x
-            | Some x -> x
-    | _ -> failwith "Unreachable"
+                | None -> { ctx with trace = sprintf "Name %s is not defined" id::ctx.trace }, Flag id
+                | Some x -> ctx, x
+            | Some x -> ctx, x
+    | _ -> failwithtf ctx.trace "Unreachable %A" ast
 let exec (ctx: Context) (callee: Value) (args: Value list) =
     //printfn "exec %A %A" callee args
     let args' = ctx.args
@@ -232,4 +252,4 @@ let exec (ctx: Context) (callee: Value) (args: Value list) =
     | FSharpFunction f ->
         let ctx, value = f ctx args 
         { ctx with args = args' }, value
-    | _ -> failwithf "Error when calling %A: Should call a function" callee
+    | _ -> failwithtf ctx.trace "Error when calling %A: Should call a function" callee

@@ -16,23 +16,28 @@ module rec AestasScript =
     }
     type AestasScriptExecuter(commands) =
         inherit CommandExecuter<AestasScriptCommand>(commands)
-        member val Context = { binds = Prim.operators; args = Map.empty; print = ignore } with get, set
+        member val Context = { binds = Prim.operators; args = Map.empty; print = ignore; trace = [] } with get, set
         override this.Execute env cmd =
-            let binds =
-                ArrList.fold (fun map cmd -> 
-                    map |>
-                    Map.change cmd.name (fun _ -> cmd.execute this env |> FSharpFunction |> Some))
-                    this.Context.binds this.Commands
-            let parse code = 
-                let lexbuf = LexBuffer<char>.FromString code
-                try
-                    let res = Parser.parse Lexer.read lexbuf
-                    res
-                with e -> failwithf "parse error: %A\nat: (%d, %d), %A, %A" e.Message lexbuf.EndPos.Line lexbuf.EndPos.Column lexbuf.Lexeme (Lexer.read lexbuf)
-            let ast = cmd.Trim() |> parse
-            let ctx, ret = run {this.Context with binds = binds; print = env.log} ast
-            this.Context <- ctx 
-            //Logger.logInfo[0] (sprintf "ctx: %A" ctx)
-            match ret with
-            | Unit -> ()
-            | x -> env.log x.Print
+            try
+                let binds =
+                    ArrList.fold (fun map cmd -> 
+                        map |>
+                        Map.change cmd.name (fun _ -> cmd.execute this env |> FSharpFunction |> Some))
+                        this.Context.binds this.Commands
+                let parse code = 
+                    let lexbuf = LexBuffer<char>.FromString code
+                    try
+                        let res = Parser.parse Lexer.read lexbuf
+                        res
+                    with e -> failwithf "parse error: %A\nat: (%d, %d), %A, %A" e.Message lexbuf.EndPos.Line lexbuf.EndPos.Column lexbuf.Lexeme (Lexer.read lexbuf)
+                let ast = cmd.Trim() |> parse
+                let ctx, ret = run {this.Context with binds = binds; print = env.log; trace = []} ast
+                this.Context <- ctx 
+                //Logger.logInfo[0] (sprintf "ctx: %A" ctx)
+                match ret with
+                | Unit -> ()
+                | x -> env.log x.Print
+            with 
+            | AestasScriptException(msg, trace) -> 
+                sprintf "Error: %s\nTrace: %s" msg (trace |> String.concat "\n") |> env.log
+            | e -> sprintf "Error: %s" e.Message |> env.log

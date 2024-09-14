@@ -1,15 +1,22 @@
 module Aestas.Commands.Compiler.Test
 open FSharp.Text.Lexing
 let parse code = 
+    // let lexbuf = LexBuffer<char>.FromString code
+    // let rec go() =
+    //     if lexbuf.IsPastEndOfStream then ()
+    //     else 
+    //         printf "%A, " (Lexer.read lexbuf)
+    //         go()
+    // go()
     let lexbuf = LexBuffer<char>.FromString code
     try
         let res = Parser.parse Lexer.read lexbuf
         res
-    with e -> failwithf "parse error: %A\nat: (%d, %d), %A, %A" e.Message lexbuf.EndPos.Line lexbuf.EndPos.Column lexbuf.Lexeme (Lexer.read lexbuf)
+    with e -> failwithf "parse error: %A\nat: (%d, %d), %A, %A" e lexbuf.EndPos.Line lexbuf.EndPos.Column lexbuf.Lexeme (Lexer.read lexbuf)
 let test (code: string) = 
     let ast = code.Trim() |> parse
     printfn "ast ("; ast |> List.iter (printfn "%A") ; printfn ")\nrun:"
-    let ctx, ret = Runtime.run (Runtime.makeContext Runtime.Prim.operators Map.empty (printf "%s")) ast
+    let ctx, ret = Runtime.run (Runtime.makeContext Runtime.Prim.operators Map.empty (printf "%s") []) ast
     printfn "\n%A" ctx
     printfn "returns: %A" ret
 [<EntryPoint>]
@@ -50,6 +57,36 @@ let f () = (
 f 1 2 3 4 5
 f 1 2 3
 f 1 2 3 -t --Test
+        """
+        """
+(raise a)
+        """
+        """
+1+2+3+4+5
+        """
+        """
+let 我使用unicode = "确实"
+        """
+        """
+let a, b, c = 1, 2, 3
+let h, t... = 1, 2, 3
+let v = 1, 2, 3
+v=(_), v=(_, _), v=(_, ...), v=(_, _, _, _, ...)
+        """
+        """
+let sum tuple = (
+    let go tuple acc = (
+        if tuple=(,) then acc else (
+            let h, t... = tuple
+            go t (acc+h)
+        )
+    )
+    go tuple ()
+)
+sum (1, 2, 3, 4, 5), sum ("Mai ", "Nemu ", "Isu ", "Anon ", "Chihaya ")
+        """
+        """
+print (type (1), type (1,), type (), type (,))
         """
     ]
     testCode |> List.iteri (fun i src -> printfn "\n%d:" i; try test src with ex -> printfn "error: %A" ex.Message)

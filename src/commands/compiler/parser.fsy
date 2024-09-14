@@ -24,6 +24,7 @@ open Aestas.Commands.Compiler.Language
 %token PIPE
 %token <string> BINOP_0
 %token <string> BINOP_1
+%token TAILPATTERN
 %token EQUAL
 %token RIGHT_ARROW
 %token COLON
@@ -53,6 +54,7 @@ rev_lines:
   | SPACE expr { [$2] }
   | expr { [$1] }
   | rev_lines NEWLINE expr { $3::$1 }
+  | rev_lines NEWLINE { $1 }
 
 expr: 
   | tuple { $1 }
@@ -66,11 +68,12 @@ bind:
 
 tuple:
   | { Tuple [] }
-  | rev_tuple { match $1 with [x] -> x | x -> Tuple(List.rev x) }
+  | rev_tuple { match $1 with true, [x] -> Tuple [x] | false, [x] -> x | _, ls -> Tuple(List.rev ls) }
 
 rev_tuple:
-  | value_expr { [$1] }
-  | rev_tuple COMMA maybe_space value_expr maybe_space { $4::$1 }
+  | value_expr { false, [$1] }
+  | rev_tuple COMMA maybe_space value_expr maybe_space { (let strict, ls = $1 in (strict, $4::ls)) }
+  | rev_tuple COMMA { (let _, ls = $1 in (true, ls)) }
 
 maybe_space:
   | SPACE { }
@@ -112,9 +115,11 @@ ftuple:
 
 rev_ftuple:
   | fatom { [$1] }
-  | rev_ftuple COMMA maybe_space atom maybe_space { $4::$1 }
+  | rev_ftuple COMMA maybe_space fatom maybe_space { $4::$1 }
 
+  
 fatom:
+  | ID TAILPATTERN { TailPattern $1 }
   | ID { Identifier $1 }
   | LEFT_PAREN maybe_space ftuple maybe_space RIGHT_PAREN { $3 }
 
@@ -122,15 +127,15 @@ atom: atom_eq { $1 }
 
 atom_eq: 
   | atom_plus { $1 }
-  | atom_plus EQUAL atom_plus { Call(Identifier "=", [$1; $3]) }
+  | atom_eq EQUAL atom_eq { Call(Identifier "=", [$1; $3]) }
 
 atom_plus: 
   | atom_mul { $1 }
-  | atom_mul BINOP_0 atom_mul { Call(Identifier $2, [$1; $3]) }
+  | atom_plus BINOP_0 atom_plus { Call(Identifier $2, [$1; $3]) }
 
 atom_mul: 
   | atom_powertuple { $1 }
-  | atom_powertuple BINOP_1 atom_powertuple { Call(Identifier $2, [$1; $3]) }
+  | atom_mul BINOP_1 atom_mul { Call(Identifier $2, [$1; $3]) }
 
 atom_powertuple: rev_power_tuple { match $1 with [x] -> x | x -> Tuple(List.rev x) }
 
@@ -142,9 +147,10 @@ atom_unary:
   | term { $1 }
   | BINOP_0 NUMBER { match $1 with "+" -> Number $2 | "-" -> Number (-$2) | _ -> failwith "Invalid unary operator" }
   | BINOP_0 term { Call(Identifier $1, [$2]) }
-
+  
 term:
   | ID { Identifier $1 }
+  | TAILPATTERN { Identifier "..."}
   | BINOP_0 { Identifier $1 }
   | BINOP_1 { Identifier $1 }
   | EQUAL { Identifier "=" }
@@ -154,4 +160,5 @@ term:
   | TRUE { Bool true }
   | FALSE { Bool false }
   | LEFT_PAREN maybe_space RIGHT_PAREN { Unit }
-  | LEFT_PAREN maybe_space expr maybe_space RIGHT_PAREN { $3 }
+  | LEFT_PAREN maybe_space COMMA maybe_space RIGHT_PAREN { Tuple[] }
+  | LEFT_PAREN maybe_space tuple maybe_space RIGHT_PAREN { $3 }
