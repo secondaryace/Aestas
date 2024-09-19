@@ -9,7 +9,7 @@ open System.Text.Unicode
 open System.Net.Http
 
 module Prim = 
-    let version = Version(0, 240913)
+    let version = Version(0, 240919)
     #if DEBUG
     let debug = true
     #else

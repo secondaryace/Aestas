@@ -1,11 +1,10 @@
 namespace Aestas.Commands
+open System
+open System.Net.Http
 open Aestas.Core
 open Aestas.Commands.AestasScript
 open Aestas.Commands.Compiler.Runtime
 open Aestas.Prim
-
-open System
-open System.Net.Http
 
 module InfoCommand =
     let execute executer env ctx args =
@@ -31,7 +30,7 @@ module InfoCommand =
 | Managed Heap: {heap:N4} MB
 | Process ID: {pid}
 | Working Directory: {pwd}"""
-        ctx, Unit
+        ctx, Tuple []
     let make() = {
         name = "info"
         description = "Print system infos"

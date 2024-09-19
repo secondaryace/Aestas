@@ -22,7 +22,7 @@ let letter = '\Lu' | '\Ll' | '\Lm' | '\Lo' | '\Nl'
 
 let frac = '.' digit*
 let exp = ['e' 'E'] ['-' '+']? digit+
-let float = digit* frac? exp?
+let float = digit+ frac? exp?
 
 let ident_start = letter | '_'  | '@'
 
@@ -33,8 +33,9 @@ let ident_char = letter | digit | connecting_char | combining_char | formatting_
 
 let id = ('-' | "--")? ident_start ident_char* 
 
-let op_0 = ['+' '-']
-let op_1 = ['*' '/']
+let op_comp = '<' | '>' | "<>" | ">=" | "<="
+let op_0 = '+' | '-'
+let op_1 = '*' | '/'
 
 let white = [' ' '\t']+
 let newline = ['\r' '\n' ' ']+
@@ -44,18 +45,20 @@ rule read =
   | white    { SPACE }
   | newline  { newline lexbuf; NEWLINE }
   | "let"    { LET }
+  | 'λ'      { LAMBDA }
   | "lambda" { LAMBDA }
   | "true"   { TRUE }
   | "false"  { FALSE }
   | "if"     { IF }
   | "then"   { THEN }
   | "else"   { ELSE }
+  | "->"     { RIGHT_ARROW }
   | op_0     { BINOP_0 (string (lexeme lexbuf)) }
   | op_1     { BINOP_1 (string (lexeme lexbuf)) }
   | id       { ID (string (lexeme lexbuf))}
   | float    { NUMBER (float (lexeme lexbuf)) }
   | '='      { EQUAL }
-  | "->"     { RIGHT_ARROW }
+  | op_comp  { BINOP_COMP (string (lexeme lexbuf)) }
   | '"'      { read_string "" false lexbuf } 
   | '{'      { LEFT_BRACE }
   | '}'      { RIGHT_BRACE }

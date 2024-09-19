@@ -13,7 +13,7 @@ module AestasScriptCommands =
         privilege = CommandPrivilege.Normal
         execute = fun executer env ctx args -> 
             env.log $"Aestas version {version}\nAestas Script"
-            ctx, Unit
+            ctx, Tuple []
         }
     let clear() = {
         name = "clear"
@@ -23,7 +23,7 @@ module AestasScriptCommands =
         execute = fun executer env ctx args -> 
             env.bot.ClearCachedContext env.domain
             env.log "Cached context cleared"
-            ctx, Unit
+            ctx, Tuple []
         }
     let help() = {
         name = "help"
@@ -36,5 +36,21 @@ module AestasScriptCommands =
             executer.Commands |>
             ArrList.iter (fun v -> sb.Append $"\n* {v.name}:\n   {v.description}" |> ignore)
             sb.ToString() |> env.log
-            ctx, Unit
-    }
+            ctx, Tuple []
+        }
+    let dump() = {
+        name = "dump"
+        description = "Dump the cached context"
+        accessibleDomain = CommandAccessibleDomain.All
+        privilege = CommandPrivilege.Normal
+        execute = fun executer env ctx args -> 
+            ctx, 
+            env.domain.Messages |> List.ofSeq |> List.map (fun m -> 
+                let msg = m.Parse()
+                Map.ofList [
+                    "sender", msg.sender.name |> string |> String
+                    "mid", msg.mid |> float |> Number
+                    "contents", msg.contents |> string |> String
+                ] |> Object
+            ) |> Tuple
+        }

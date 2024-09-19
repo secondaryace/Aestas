@@ -19,7 +19,7 @@ type Ast =
             lines |> List.map string |> String.concat "\n"
             |> sprintf "let %A = (%s)" id
         | Lambda(plist, lines) -> 
-            sprintf "lambda %s -> (%s)" 
+            sprintf "λ %s -> (%s)" 
                 (match plist with [] -> "()" | x -> x |> List.map string |> String.concat " ") 
                 (lines |> List.map string |> String.concat "\n")
         | If(condLines, brTrueLines, brFalseLines) ->

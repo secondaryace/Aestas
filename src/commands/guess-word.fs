@@ -16,7 +16,7 @@ module GuessWordCommand =
 当他们给你一个单词，比如"heat"，你告诉他们其中e和a是匹配的，这个单词类似_ e a _。
 现在，给你一个单词{randomWord}，有{randomWord.Length}个字母。这个单词是唯一的正确答案。在游戏结束时，公开谜底。
 开始游戏吧。如果有人希望你减轻难度，给一些提示也是可以的。"""
-        [AestasText prompt] |> Some |> env.bot.SelfTalk env.domain |> Async.Ignore |> Async.Start; ctx, Unit
+        [AestasText prompt] |> Some |> env.bot.SelfTalk env.domain |> Async.Ignore |> Async.Start; ctx, Tuple []
     let make() = {
         name = "guessword"
         description = "Play a word guessing game"

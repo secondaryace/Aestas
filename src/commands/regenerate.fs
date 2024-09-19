@@ -16,7 +16,7 @@ module RegenerateCommand =
             | Ok () ->
                 env.bot.SelfTalk env.domain None |> Async.Ignore |> Async.Start
             | Error _ -> ()
-        ctx, Unit
+        ctx, Tuple []
     let make() = {
         name = "regenerate"
         description = "Let the bot recall their latest message and generate a new one"

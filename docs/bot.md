@@ -3,7 +3,9 @@
 在尝试用Aestas制作自己的机器人之前，你可能需要了解F#的基础语法。当然，Aestas支持使用C#编写插件，通过加载dll的方式来使用，所以你至少要入门其中一种语言。在了解F#时，多多参考MSDN中的[F#文档](https://learn.microsoft.com/zh-cn/dotnet/fsharp/what-is-fsharp)和[.NET API文档](https://learn.microsoft.com/zh-cn/dotnet/api/?view=net-8.0)。如果你已经是F#高手，可以跳过这一步。如果你是C#高手，可以参照C#的示例代码和文档。如果你对这两种语言都不熟悉，而且很想要快速创建一个Bot，可以参照本文，也可以直接复制并修改示例代码。
 ### 打开Aestas模块
 ```fsharp
+open Aestas.Prim
 open Aestas.Core
+open Aestas.Core.AestasBot
 open Aestas.AutoInit
 ```
 ### 编写Bot创建代码
@@ -75,3 +77,6 @@ Aestas使用F#，并不具有动态语言的热重载功能，每当你增加一
 不影响原来设置的系统提示的内容。
 
 `StringBuilder`是.NET中的类，如果熟悉C#，你可能会知道它的用法。`AestasBot * StringBuilder`实际上是一个ADT（代数数据类型）样式的元组类型，在C#看来是这样：`Tuple<AestasBot, StringBuilder>`。`PipeLineChain<>`实际上只是将一些函数组合在一起链式调用的类，定义很简单。
+
+#### 小结
+本文介绍了如何从源代码创建一个最基本的bot。至于更详细的bot的各种功能，我们将在Notebook的交互式环境中演示。

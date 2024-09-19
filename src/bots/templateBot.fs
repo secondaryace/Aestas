@@ -6,7 +6,7 @@ open System.Collections.Generic
 open System.Linq
 open Aestas.Prim
 open Aestas.Core
-open Aestas.Core.BotHelper
+open Aestas.Core.AestasBot
 open Aestas.AutoInit
 // open the adapter you want to use
 //open Aestas.Adapters.AestasLagrangeBot
@@ -47,7 +47,7 @@ type TemplateBot =
 Your system instruction here
 """
             let bot = 
-                createBot {
+                createBot {|
                     name = "Template"// modify there to your bot's name
                     model = model
                     systemInstruction = systemInstruction |> Some
@@ -62,7 +62,7 @@ Your system instruction here
                     userCommandPrivilege = [
                         0u, CommandPrivilege.High
                     ] |> Some
-                }
+                |}
             // bind to QQ 
             //getProtocol<LagrangeAdapter>().InitDomainView bot 0u(* QQ *) |> bindDomain bot
             // bind to Console

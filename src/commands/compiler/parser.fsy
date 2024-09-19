@@ -26,6 +26,7 @@ open Aestas.Commands.Compiler.Language
 %token <string> BINOP_1
 %token TAILPATTERN
 %token EQUAL
+%token <string> BINOP_COMP
 %token RIGHT_ARROW
 %token COLON
 %token COMMA
@@ -128,6 +129,7 @@ atom: atom_eq { $1 }
 atom_eq: 
   | atom_plus { $1 }
   | atom_eq EQUAL atom_eq { Call(Identifier "=", [$1; $3]) }
+  | atom_eq BINOP_COMP atom_eq { Call(Identifier $2, [$1; $3]) }
 
 atom_plus: 
   | atom_mul { $1 }
@@ -140,8 +142,12 @@ atom_mul:
 atom_powertuple: rev_power_tuple { match $1 with [x] -> x | x -> Tuple(List.rev x) }
 
 rev_power_tuple:
-  | atom_unary { [$1] }
-  | rev_power_tuple POWER atom_unary { $3::$1 }
+  | atom_field { [$1] }
+  | rev_power_tuple POWER atom_field { $3::$1 }
+
+atom_field:
+  | atom_unary { $1 }
+  | atom_field DOT atom_field { Call(Identifier ".", [$1; $3]) }
 
 atom_unary:
   | term { $1 }
@@ -153,12 +159,13 @@ term:
   | TAILPATTERN { Identifier "..."}
   | BINOP_0 { Identifier $1 }
   | BINOP_1 { Identifier $1 }
+  | BINOP_COMP { Identifier $1 }
   | EQUAL { Identifier "=" }
   | POWER { Identifier "^" }
+  | DOT { Identifier "." }
   | NUMBER { Number $1 }
   | STRING { String $1 }
   | TRUE { Bool true }
   | FALSE { Bool false }
   | LEFT_PAREN maybe_space RIGHT_PAREN { Unit }
-  | LEFT_PAREN maybe_space COMMA maybe_space RIGHT_PAREN { Tuple[] }
   | LEFT_PAREN maybe_space tuple maybe_space RIGHT_PAREN { $3 }

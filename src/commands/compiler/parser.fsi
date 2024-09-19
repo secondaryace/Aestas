@@ -9,6 +9,7 @@ type token =
   | COMMA
   | COLON
   | RIGHT_ARROW
+  | BINOP_COMP of (string)
   | EQUAL
   | TAILPATTERN
   | BINOP_1 of (string)
@@ -39,6 +40,7 @@ type tokenId =
     | TOKEN_COMMA
     | TOKEN_COLON
     | TOKEN_RIGHT_ARROW
+    | TOKEN_BINOP_COMP
     | TOKEN_EQUAL
     | TOKEN_TAILPATTERN
     | TOKEN_BINOP_1
@@ -87,6 +89,7 @@ type nonTerminalId =
     | NONTERM_atom_mul
     | NONTERM_atom_powertuple
     | NONTERM_rev_power_tuple
+    | NONTERM_atom_field
     | NONTERM_atom_unary
     | NONTERM_term
 /// This function maps tokens to integer indexes

@@ -9,7 +9,7 @@ module TodaysDietCommand =
         let prompt = """为大家进行每日的饮食推荐，以以下格式：
 今天吃：[甜点] [主食] [饮料]
 最后还可以加上你的一些小小的寄语。"""
-        [AestasText prompt] |> Some |> env.bot.SelfTalk env.domain |> Async.Ignore |> Async.Start; ctx, Unit
+        [AestasText prompt] |> Some |> env.bot.SelfTalk env.domain |> Async.Ignore |> Async.Start; ctx, Tuple []
     let make() = {
         name = "今天吃什么"
         description = "推荐今天吃什么"

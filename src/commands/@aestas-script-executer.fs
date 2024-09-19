@@ -16,13 +16,19 @@ module rec AestasScript =
     }
     type AestasScriptExecuter(commands) =
         inherit CommandExecuter<AestasScriptCommand>(commands)
-        member val Context = { binds = Prim.operators; args = Map.empty; print = ignore; trace = [] } with get, set
+        member val Context = { 
+            shared = LanguagePrimitives.operators
+            binds = Map.empty
+            args = Map.empty
+            print = ignore
+            trace = [] 
+            } with get, set
         override this.Execute env cmd =
             try
                 let binds =
                     ArrList.fold (fun map cmd -> 
                         map |>
-                        Map.change cmd.name (fun _ -> cmd.execute this env |> FSharpFunction |> Some))
+                        Map.change cmd.name (fun _ -> cmd.execute this env |> ExternFunction |> Some))
                         this.Context.binds this.Commands
                 let parse code = 
                     let lexbuf = LexBuffer<char>.FromString code
@@ -35,7 +41,7 @@ module rec AestasScript =
                 this.Context <- ctx 
                 //Logger.logInfo[0] (sprintf "ctx: %A" ctx)
                 match ret with
-                | Unit -> ()
+                | Tuple [] -> ()
                 | x -> env.log x.Print
             with 
             | AestasScriptException(msg, trace) -> 
