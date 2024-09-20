@@ -33,7 +33,8 @@ module TextToImage =
         , "text2img"
         , fun bot sb ->
             sb.AppendLine("You may 'draw' picture by use format like #[text2img@res=resolution:prompt].") |> ignore
-            sb.AppendLine("e.g. #[text2img@res=portrait:a beautiful anime girl, best quality].") |> ignore
+            sb.AppendLine("e.g. #[text2img@res=portrait:Create an anime-style character with silver hair that has a blue gradient at the tips. The character should have two long strands of hair in the front and the rest tied up with a blue bow at the back. The character wears a navy blue dress with gold star patterns, white cuffs, and a white collar with a red ribbon. Add a moon-shaped accessory on top of the head. The character should be wearing thigh-high white socks and dark blue shoes with straps.].") |> ignore
+            sb.AppendLine("e.g. #[text2img@res=portrait:Create an Semi-Painterly character with pink hair and green eyes. The character should have long hair that flows down the shoulders. The character wears a red and white outfit with a sailor collar, a yellow bow at the waist, and black shoes with white socks. The character is holding a staff with a heart-shaped top.].") |> ignore
             match bot.TryGetExtraData("imageResolutions") with
             | Some (:? ImageResolutions as ress) -> 
                 sb.AppendLine("Available resolutions: ") |> ignore
