@@ -141,6 +141,11 @@ type BotContentLoadStrategy =
     | StrategyLoadAll
     /// Load media from messages that satisfy the predicate
     | StrategyLoadByPredicate of (IMessageAdapter -> bool)
+type BotFriendStrategy =
+    | StrategyFriendNone
+    | StrategyFriendAll
+    | StrategyFriendWhitelist of Dictionary<uint32, Set<uint32>>
+    | StrategyFriendBlacklist of Dictionary<uint32, Set<uint32>>
 type BotMessageReplyStrategy = 
     /// Won't reply to any message
     | StrategyReplyNone
@@ -148,7 +153,7 @@ type BotMessageReplyStrategy =
     | StrategyReplyOnlyMentionedOrPrivate
     /// Reply to all messages
     | StrategyReplyAll
-    /// Reply to messages whose domain ID is in the whitelist
+    /// Reply to messages that satisfy the predicate
     | StrategyReplyByPredicate of (AestasMessage -> bool)
 type BotMessageCacheStrategy =
     /// Clear cache after reply immediately
@@ -178,7 +183,7 @@ type BotInterestCurve =
     /// Bot will always interest in this domain
     | CurveInterestAlways
     /// Bot will lose interest in this domain after certain time
-    | CurveInterestTruncateAfterTime of int<sec>
+    | CurveInterestTruncateAfterTime of int
     /// Use your own function to determine interest
     | CurveInterestFunction of (int<sec> -> int)
 /// Used in Model <-> Aestas.Core <-> Protocol
@@ -233,6 +238,7 @@ type AestasBot() =
             if value.DomainId = domainId then this.BindDomain value
             else failwith "Domain ID mismatch"
     member this.Domains = groups :> IReadOnlyDictionary<uint32, AestasChatDomain> 
+    member val FriendStrategy = StrategyFriendAll with get, set
     member val ContentLoadStrategy = StrategyLoadAll with get, set
     member val MessageReplyStrategy = StrategyReplyNone with get, set
     member val MessageCacheStrategy = StrategyCacheAll with get, set
@@ -266,6 +272,16 @@ type AestasBot() =
                 (b.Invoke(this, sb) |> snd).ToString()
             | None -> originalSystemInstruction
         and set value = originalSystemInstruction <- value
+    member this.IsFriend (domain: AestasChatDomain) uid =
+        match this.FriendStrategy with
+        | StrategyFriendAll -> true
+        | StrategyFriendNone -> false
+        | StrategyFriendWhitelist w 
+            when w.ContainsKey domain.DomainId && w[domain.DomainId].Contains uid -> true
+        | StrategyFriendWhitelist _ -> false
+        | StrategyFriendBlacklist b 
+            when b.ContainsKey domain.DomainId && b[domain.DomainId].Contains uid -> false
+        | _ -> true
     member this.BindDomain (domain: AestasChatDomain) = 
         if groups.ContainsKey domain.DomainId then
             groups[domain.DomainId].Bot <- None
@@ -340,6 +356,7 @@ Format:
                     } command
                 return Ok [], ignore
             | None, _ -> return Error "No model binded to this bot", ignore
+            | Some _, _ when message.SenderId |> this.IsFriend domain |> not -> return Ok [], ignore
             | Some model, _ ->
                 // check if illegal strategy
                 match this.MessageReplyStrategy, this.MessageCacheStrategy with
@@ -482,7 +499,8 @@ type CommandExecuter() =
 type CommandExecuter<'t>(commands: 't seq) =
     inherit CommandExecuter()
     abstract member AddCommand: 't -> unit
-    member _.Commands: arrList<'t> = arrList commands
+    abstract member Commands: arrList<'t>
+    default _.Commands = arrList commands
     default this.AddCommand command = this.Commands.Add command
 type TextToImageArgument ={
     prompt: string
@@ -703,9 +721,11 @@ module Builtin =
             match domain.Members |> Array.tryFind (fun x -> x.name = content) with
             | Some m -> AestasMention {uid = m.uid; name = m.name}
             | None -> AestasText $"[mention: {content}]"
+        "blank" , fun (domain, param, content) -> AestasBlank
     ]
     let overridePrimTip = [
         "mention", "Using format #[mention: name] to mention or at someone. e.g. #[mention: Stella]"
+        "blank", "Using format #[blank] to indicate a blank content"
     ]
     let modelOutputParser (bot: AestasBot) (domain: AestasChatDomain) (botOut: string) =
         let cache = StringBuilder()
@@ -837,8 +857,14 @@ module Builtin =
         privilege: CommandPrivilege
         execute: SpacedTextCommandExecuter -> CommandEnvironment -> string[] -> unit
     }
-    type SpacedTextCommandExecuter(commands) =
-        inherit CommandExecuter<SpacedTextCommand>(commands)
+    type SpacedTextCommandExecuter(commands') =
+        inherit CommandExecuter<SpacedTextCommand>(commands')
+        let commands = Dictionary<string, SpacedTextCommand>()
+        do
+            commands' |> List.iter (fun c -> commands.Add(c.name, c))
+        override _.Commands = arrList commands.Values
+        override _.AddCommand cmd =
+            commands.Add(cmd.name, cmd)
         override this.Execute env cmd = 
             let cmd = Regex.Matches(cmd, """("[^\n\r]+"|[^\n\r ]+)""")
             if cmd.Count = 0 then env.log "No command found"
@@ -848,8 +874,9 @@ module Builtin =
                     |> Array.map (fun x -> if x.Value.StartsWith("\"") then x.Value.[1..^1] else x.Value)
                 let name = cmd[0]
                 let args = cmd |> Array.skip 1
-                match this.Commands |> ArrList.tryFind (fun c -> c.name = name) with
-                | Some cmd when cmd.privilege <= env.privilege -> cmd.execute this env args
+                match Dict.tryGetValue name commands with
+                | Some cmd when cmd.privilege <= env.privilege -> 
+                    try cmd.execute this env args with ex -> env.log $"Error: {ex.Message}"
                 | Some _ -> env.log $"Permission denied"
                 | None -> env.log $"Command {name} not found"
     let versionCommand() = {
@@ -881,10 +908,134 @@ module Builtin =
             ArrList.iter (fun v -> sb.Append $"\n* {v.name}:\n   {v.description}" |> ignore)
             sb.ToString() |> env.log
         }
+    let echoCommand() = {
+        name = "echo"
+        description = "Repeat the input"
+        accessibleDomain = CommandAccessibleDomain.All
+        privilege = CommandPrivilege.Normal
+        execute = fun executer env args ->
+            let sb = StringBuilder()
+            args |> Array.iter (fun x -> sb.Append x |> ignore)
+            sb.ToString() |> env.log
+        }
+    let chfrwlCommand() = {
+        name = "chfrwl"
+        description = "Check Friend White List"
+        accessibleDomain = CommandAccessibleDomain.All
+        privilege = CommandPrivilege.Normal
+        execute = fun executer env args ->
+            match env.bot.FriendStrategy with
+            | StrategyFriendWhitelist wl ->
+                let sb = StringBuilder()
+                sb.Append "## White List" |> ignore
+                if wl.ContainsKey env.domain.DomainId then
+                    wl[env.domain.DomainId] |> Set.iter (fun x -> 
+                        match env.domain.Members |> Array.tryFind (fun y -> y.uid = x) with
+                        | Some m -> sb.AppendLine m.name |> ignore
+                        | None -> ())
+                sb.ToString() |> env.log
+            | _ -> env.log "FriendStrategy not supported"
+        }
+    let chfrblCommand() = {
+        name = "chfrbl"
+        description = "Check Friend Black List"
+        accessibleDomain = CommandAccessibleDomain.All
+        privilege = CommandPrivilege.Normal
+        execute = fun executer env args ->
+            match env.bot.FriendStrategy with
+            | StrategyFriendBlacklist bl ->
+                let sb = StringBuilder()
+                sb.Append "## Black List" |> ignore
+                if bl.ContainsKey env.domain.DomainId then
+                    bl[env.domain.DomainId] |> Set.iter (fun x -> 
+                        match env.domain.Members |> Array.tryFind (fun y -> y.uid = x) with
+                        | Some m -> sb.AppendLine m.name |> ignore
+                        | None -> ())
+                    sb.ToString() |> env.log
+            | _ -> env.log "FriendStrategy not supported"
+        }
+    let ufrwlCommand() = {
+        name = "ufrwl"
+        description = "Update Friend White List"
+        accessibleDomain = CommandAccessibleDomain.All
+        privilege = CommandPrivilege.Normal
+        execute = fun executer env args ->
+            let rec go wl i =
+                if i = args.Length then wl 
+                elif String.startsWith args[i] "-" then
+                    let t = args[i][1..]
+                    match 
+                        env.domain.Members 
+                        |> Array.tryFind (fun x -> x.name = t)
+                    with
+                    | Some mem ->
+                        if Set.contains mem.uid wl then
+                            env.log $"Remove member {args[i]}({mem.uid}) from the whitelist";
+                            go (Set.remove mem.uid wl) (i+1)
+                        else
+                            env.log $"Member {args[i]} is not in the whitelist"; go wl (i+1)
+                    | _ -> env.log $"Member {args[i]}       not found"; go wl (i+1)
+                else
+                    match 
+                        env.domain.Members 
+                        |> Array.tryFind (fun x -> x.name = args[i])
+                    with
+                    | Some mem ->
+                        env.log $"Add member {args[i]}({mem.uid}) to the whitelist"
+                        go (Set.add mem.uid wl) (i+1)
+                    | _ -> env.log $"Member {args[i]} not found"; go wl (i+1)
+            match env.bot.FriendStrategy with
+            | StrategyFriendWhitelist wl ->
+                if wl.ContainsKey env.domain.DomainId |> not then wl.Add(env.domain.DomainId, Set.empty)
+                wl[env.domain.DomainId] <- go wl[env.domain.DomainId] 0
+            | _ -> env.log "FriendStrategy not supported"
+        }
+    let ufrblCommand() = {
+        name = "ufrbl"
+        description = "Update Friend Black List"
+        accessibleDomain = CommandAccessibleDomain.All
+        privilege = CommandPrivilege.Normal
+        execute = fun executer env args ->
+            let rec go wl i =
+                if i = args.Length then wl 
+                elif String.startsWith args[i] "-" then
+                    let t = args[i][1..]
+                    match 
+                        env.domain.Members 
+                        |> Array.tryFind (fun x -> x.name = t)
+                    with
+                    | Some mem ->
+                        if Set.contains mem.uid wl then
+                            env.log $"Remove member {args[i]}({mem.uid}) from the blacklist";
+                            go (Set.remove mem.uid wl) (i+1)
+                        else
+                            env.log $"Member {args[i]} is not in the blacklist"; go wl (i+1)
+                    | _ -> env.log $"Member {args[i]} not found"; go wl (i+1)
+                else
+                    match 
+                        env.domain.Members 
+                        |> Array.tryFind (fun x -> x.name = args[i])
+                    with
+                    | Some mem ->
+                        env.log $"Add member {args[i]}({mem.uid}) to the blacklist"
+                        go (Set.add mem.uid wl) (i+1)
+                    | _ -> env.log $"Member {args[i]} not found"; go wl (i+1)
+            match env.bot.FriendStrategy with
+            | StrategyFriendBlacklist bl ->
+                if bl.ContainsKey env.domain.DomainId |> not then bl.Add(env.domain.DomainId, Set.empty)
+                bl[env.domain.DomainId] <- go bl[env.domain.DomainId] 0
+            | _ -> env.log "FriendStrategy not supported"
+        }
+
     let commands() = [
             versionCommand()
             clearCommand()
             helpCommand()
+            echoCommand()
+            chfrwlCommand()
+            chfrblCommand()
+            ufrwlCommand()
+            ufrblCommand()
         ]
 module AestasBot =
     let inline tryGetModel (bot: AestasBot) = bot.Model
@@ -933,6 +1084,7 @@ module AestasBot =
         model: ILanguageModelClient
         systemInstruction: string option
         systemInstructionBuilder: PipeLineChain<AestasBot*StringBuilder> option
+        friendStrategy: BotFriendStrategy option
         contentLoadStrategy: BotContentLoadStrategy option
         contentParseStrategy: BotContentParseStrategy option
         messageReplyStrategy: BotMessageReplyStrategy option
@@ -947,6 +1099,7 @@ module AestasBot =
         bot.Model <- Some botParam.model
         ``set?`` bot.set_SystemInstruction botParam.systemInstruction
         bot.SystemInstructionBuilder <- botParam.systemInstructionBuilder
+        ``set?`` bot.set_FriendStrategy botParam.friendStrategy
         ``set?`` bot.set_ContentLoadStrategy botParam.contentLoadStrategy
         ``set?`` bot.set_MessageReplyStrategy botParam.messageReplyStrategy
         ``set?`` bot.set_MessageCacheStrategy botParam.messageCacheStrategy
@@ -961,286 +1114,10 @@ module AestasBot =
         let bot = AestasBot()
         bot.Name <- name
         bot
-module Console =
-    let inline resolution() = struct(Console.WindowWidth, Console.WindowHeight)
-    let inline clear() = Console.Clear()
-    let inline cursorPos() = Console.GetCursorPosition()
-    let inline setCursor x y = 
-        let x, y = min (Console.WindowWidth-1) x, min (Console.WindowHeight-1) y
-        let x, y = max 0 x, max 0 y
-        Console.SetCursorPosition(x, y)
-    let inline write (s: string) = Console.Write s
-    let inline setColor (c: ConsoleColor) = Console.ForegroundColor <- c
-    let inline resetColor() = Console.ResetColor()
-    let inline writeColor (s: string) (c: ConsoleColor) = setColor c; write s; resetColor()
-    let inline writeUnderlined (s: string) = write $"\x1B[4m{s}\x1B[0m"
-    let inline writeColorUnderlined (s: string) (c: ConsoleColor) = setColor c; writeUnderlined s; resetColor()
-    let inline setCursorVisible () = Console.CursorVisible <- true
-    let inline setCursorInvisible () = Console.CursorVisible <- false
-    let inline measureChar (c: char) =
-        if c = '\n' then 0
-        elif c = '\r' then 0
-        // 0x4e00 - 0x9fbb is cjk
-        elif int c >= 0x4e00 && int c <=0x9fbb then 2
-        elif int c >= 0xff00 && int c <=0xffef then 2
-        else 1   
-    let inline measureString (s: ReadOnlyMemory<char>) =
-        let rec go i l =
-            if i >= s.Length then l else
-            go (i+1) (l+measureChar s.Span[i])
-        go 0 0
-    let inline measureString' (s: string) = s.AsMemory() |> measureString
-    let inline ( ..+ ) (struct(x, y)) (struct(x', y')) = struct(x+x', y+y')
-    let inline ( ..- ) (struct(x, y)) (struct(x', y')) = struct(x-x', y-y')
-    /// x * y * w * h -> x' * y'
-    type DrawCursor<'t> = 't -> struct(int*int*int*int) -> struct(int*int)
-    let stringDrawCursor (s: string) (struct(x, y, w, h)) =
-        let s = s.AsMemory()
-        let w = Console.WindowWidth |> min w
-        let rec draw x y (s: ReadOnlyMemory<char>) =
-            if y >= h || s.Length = 0 then struct(x, y) else
-            Console.SetCursorPosition(x, y)
-            let rec calcRest i l =
-                if i >= s.Length then i, i
-                elif l+x > w then i-2, i-2
-                elif l+x = w then i, i
-                elif i+1 < s.Length && s.Span[i] = '\n' && s.Span[i+1] = '\r' then i, i+2
-                elif s.Span[i] = '\n' then i, i+1
-                else calcRest (i+1) (l+measureChar s.Span[i])
-            let delta, trim = calcRest 0 0
-            s.Slice(0, delta) |> Console.Write
-            draw x (y+1) (s.Slice trim)
-        draw x y s
-    let logEntryDrawCursor (this: Logger.LogEntry) st =
-        Console.ForegroundColor <- Logger.levelToColor this.level
-        let s = this.Print()
-        let ret = stringDrawCursor s st in Console.ResetColor(); ret
-    [<AbstractClass>]
-    type CliView(_posX: int, _posY: int, _width: int, _height: int) =
-        member val Children: CliView arrList option = None with get, set
-        member val Parent: CliView option = None with get, set
-        abstract member Draw: unit -> unit
-        abstract member HandleInput: ConsoleKeyInfo -> unit
-        abstract member Update: unit -> unit
-        member this.Position = struct(_posX, _posY) ..+ match this.Parent with | Some p -> p.Position | _ -> struct(0, 0)
-        member this.X = _posX + match this.Parent with | Some p -> p.X | _ -> 0
-        member this.Y = _posY + match this.Parent with | Some p -> p.Y | _ -> 0
-        member this.Width = _width
-        member this.Height = _height
-        member this.Size = struct(_width, _height)
-        abstract member Append: CliView -> unit
-        abstract member Remove: CliView -> unit
-        default this.Draw() = 
-            match this.Children with
-            | None -> ()
-            | Some c -> c |> ArrList.iter (fun x -> x.Draw())
-        default this.HandleInput(info: ConsoleKeyInfo) = 
-            match this.Children with
-            | None -> ()
-            | Some c -> c |> ArrList.iter (fun x -> x.HandleInput info)
-        default this.Update() =
-            match this.Children with
-            | None -> ()
-            | Some c -> c |> ArrList.iter (fun x -> x.Update())
-        default this.Append(view: CliView) = 
-            match this.Children with
-            | None -> 
-                view.Parent <- Some this
-                this.Children <- view |> ArrList.singleton |> Some
-            | Some c -> 
-                view.Parent <- Some this
-                c.Add view
-        default this.Remove(view: CliView) =
-            match this.Children with
-            | None -> failwith "No children"
-            | Some c -> 
-                view.Parent <- None
-                c.Remove view |> ignore
-    type PanelView(posX: int, posY: int, width: int, height: int) =
-        inherit CliView(posX, posY, width, height)
-    type TextView(text: string, color: ConsoleColor option, posX: int, posY: int) =
-        inherit CliView(posX, posY, measureString' text, 1)
-        override this.Draw() =
-            match color with
-            | Some c -> 
-                Console.ForegroundColor <- c
-                setCursor this.X this.Y
-                Console.Write text
-                Console.ResetColor()
-            | None -> 
-                setCursor this.X this.Y
-                Console.Write text
-            base.Draw()
-    type DynamicCursorView<'t>(object: unit -> 't, drawCursor: DrawCursor<'t>, posX: int, posY: int, width: int, height: int) =
-        inherit CliView(posX, posY, width, height)
-        override this.Draw() =
-            drawCursor (object()) struct(this.X, this.Y, this.X+width, this.Y+height) |> ignore
-    type DynamicObjectView<'t when 't :> CliView>(object: unit -> 't, posX: int, posY: int, width: int, height: int) =
-        inherit CliView(posX, posY, width, height)
-        override this.Draw() =
-            let toDraw = object()
-            this.Append toDraw
-            base.Draw()
-            this.Remove toDraw
-        override this.HandleInput info =
-            let toDraw = object()
-            this.Append toDraw
-            base.HandleInput info
-            this.Remove toDraw
-    type InputView(action: string -> unit,posX: int, posY: int, width: int, height: int) =
-        inherit CliView(posX, posY, width, height)
-        let mutable text: string option = None
-        override this.HandleInput(info: ConsoleKeyInfo) =
-            match info.Key, info.KeyChar, text with
-            | _, '：', None
-            | _, ':', None  -> 
-                setColor ConsoleColor.Cyan
-                setCursorVisible()
-                setCursor this.X this.Y
-                let s = Console.ReadLine()
-                if s.Length > width then
-                    text <- s.Substring(0, width) |> Some
-                else
-                    text <- Some s
-                resetColor()
-                setCursorInvisible()
-            | ConsoleKey.Backspace, _, Some _ ->
-                text <- None
-            | ConsoleKey.Enter, _, Some s ->
-                action s
-                text <- None
-            | _ -> ()
-        override this.Draw() =
-            setCursor this.X this.Y
-            match text with
-            | None -> new string(' ', width) |> writeUnderlined
-            | Some s -> 
-                s |> writeUnderlined
-                let l = measureString' s
-                if l < width then new string(' ', width-l) |> writeUnderlined
-    type ButtonView(func: bool -> bool, text: string, color: ConsoleColor option, activeColor: ConsoleColor option, key: ConsoleKey, posX: int, posY: int) =
-        inherit CliView(posX, posY, measureString' text, 1)
-        member val Active = false with get, set
-        override this.HandleInput(info: ConsoleKeyInfo) =
-            match info.Key with
-            | x when x = key -> 
-                this.Active <- func this.Active
-            | _ -> ()
-        override this.Draw() =
-            match color, activeColor, this.Active with
-            | Some c, _, false
-            | _, Some c, true ->
-                Console.ForegroundColor <- c
-                setCursor this.X this.Y
-                Console.Write text
-                Console.ResetColor()
-            | _ -> 
-                setCursor this.X this.Y
-                Console.Write text
-            base.Draw()
-    type TabView(tabs: (string*CliView) arrList, asLeft: ConsoleKey, asRight: ConsoleKey, posX: int, posY: int, width: int, height: int) as this =
-        inherit CliView(posX, posY, width, height)
-        let update() =
-            this.Children <- 
-                [let v' = PanelView(this.X, this.Y+2, width, height-2) in 
-                    tabs |> ArrList.iter(fun (_, v) -> v'.Append v);
-                    v'.Parent <- Some this;
-                    v' :> CliView]
-                |> arrList
-                |> Some
-        do update()
-        member _.Tabs = tabs
-        member val Index = 0 with get, set
-        override this.Update() = update()
-        override this.Draw() = 
-            let rec draw i x = 
-                if i >= this.Tabs.Count || x > this.X+width then () else
-                if i <> 0 then Console.Write '|'
-                setCursor x this.Y
-                let name, _ = this.Tabs[i]
-                if i = this.Index then 
-                    Console.BackgroundColor <- ConsoleColor.White; Console.ForegroundColor <- ConsoleColor.Black
-                name.AsMemory().Slice(0, min name.Length (this.X+width-x)) |> Console.Write
-                Console.BackgroundColor <- ConsoleColor.DarkGray; Console.ForegroundColor <- ConsoleColor.White
-                draw (i+1) (x+name.Length+1)
-            Console.BackgroundColor <- ConsoleColor.DarkGray; Console.ForegroundColor <- ConsoleColor.White
-            if ArrList.fold (fun acc (n: string, _) -> acc + n.Length+1) 0 this.Tabs[0..min (this.Tabs.Count-1) (this.Index+1)] >= width then
-                draw this.Index this.X
-            else
-                draw 0 this.X
-            Console.ResetColor()
-            setCursor this.X (this.Y+1)
-            let pages = $" {this.Index+1}/{this.Tabs.Count} "
-            let rec draw x = if x >= this.X+width-pages.Length+1 then () else (Console.Write '─'; draw (x+1))
-            draw this.X
-            Console.Write pages
-            this.Children.Value[0].Children.Value[this.Index].Draw()
-        override this.HandleInput(info: ConsoleKeyInfo) =
-            match info.Key with
-            | x when x = asLeft -> this.Index <- (this.Index+this.Tabs.Count-1)%this.Tabs.Count
-            | x when x = asRight -> this.Index <- (this.Index+1)%this.Tabs.Count
-            | _ -> this.Children.Value[0].Children.Value[this.Index].HandleInput info
-        override this.Append _ = failwith "TabView doesn't support Append"
-        override this.Remove _ = failwith "TabView doesn't support Remove"
-    type VerticalTabView(tabs: (string*CliView) arrList, asUp: ConsoleKey, asDown: ConsoleKey, posX: int, posY: int, width: int, height: int, leftPanelWidth: int) as this =
-        inherit CliView(posX, posY, width, height)
-        let update() =
-            this.Children <- 
-                [let v' = PanelView(this.X+leftPanelWidth, this.Y, width-leftPanelWidth, height) in 
-                    tabs |> ArrList.iter(fun (_, v) -> v'.Append v);
-                    v'.Parent <- Some this;
-                    v' :> CliView]
-                |> arrList
-                |> Some
-        do update()
-        member _.Tabs = tabs
-        member val Index = 0 with get, set
-        override this.Update() = update()
-        override this.Draw() = 
-            let rec draw i y = 
-                if i >= this.Tabs.Count || y > this.Y+height then () else
-                setCursor this.X y
-                let name = (fst this.Tabs[i]).AsMemory()
-                if i = this.Index then 
-                    Console.BackgroundColor <- ConsoleColor.White; Console.ForegroundColor <- ConsoleColor.Black
-                let len = measureString name
-                if len >= leftPanelWidth then
-                    name.Slice(0, leftPanelWidth-1) |> Console.Write
-                else
-                    name |> Console.Write
-                    new string(' ', leftPanelWidth-len) |> Console.Write
-                Console.BackgroundColor <- ConsoleColor.DarkGray; Console.ForegroundColor <- ConsoleColor.White
-                draw (i+1) (y+1)
-            Console.BackgroundColor <- ConsoleColor.DarkGray; Console.ForegroundColor <- ConsoleColor.White
-            if this.Index > height then
-                draw (this.Index-height) this.Y
-            else
-                draw 0 this.Y
-            Console.ResetColor()
-            let rec draw y = if y >= this.Y+height then () else (setCursor (this.X+leftPanelWidth-1) y;Console.Write '|'; draw (y+1))
-            draw this.Y
-            this.Children.Value[0].Children.Value[this.Index].Draw()
-        override this.HandleInput(info: ConsoleKeyInfo) =
-            match info.Key with
-            | x when x = asUp -> this.Index <- (this.Index+this.Tabs.Count-1)%this.Tabs.Count
-            | x when x = asDown -> this.Index <- (this.Index+1)%this.Tabs.Count
-            | _ -> this.Children.Value[0].Children.Value[this.Index].HandleInput info
-        override this.Append _ = failwith "TabView doesn't support Append"
-        override this.Remove _ = failwith "TabView doesn't support Remove"
-    type VerticalListView<'t>(source: IReadOnlyList<'t>, drawCursor: DrawCursor<'t>, asUp: ConsoleKey, asDown: ConsoleKey, posX: int, posY: int, width: int, height: int) =
-        inherit CliView(posX, posY, width, height)
-        member val Source = source with get, set
-        member val Index = 0 with get, set
-        override this.Draw() =
-            this.Index <- this.Index |> min (this.Source.Count-1) |> max 0
-            let rec draw i y =
-                if i >= this.Source.Count || y >= this.Y+height then () else
-                let struct(_, y) = drawCursor this.Source[i] struct(this.X, y, this.X+width, this.Y+height)
-                draw (i+1) y
-            draw this.Index this.Y
-            base.Draw()
-        override this.HandleInput(info: ConsoleKeyInfo) =
-            match info.Key with
-            | x when x = asUp -> this.Index <- max 0 (this.Index-1)
-            | x when x = asDown -> this.Index <- min (this.Source.Count-1) (this.Index+1)
-            | _ -> ()
+module CommandExecuter =
+    let inline tryAddCommand<'t> (executer: CommandExecuter) cmd =
+        match executer with
+        | :? CommandExecuter<'t> as e ->
+            e.AddCommand cmd; Ok ()
+        | _ -> Error "Type error"
+    let inline getCommands (executer: CommandExecuter<'t>) = executer.Commands

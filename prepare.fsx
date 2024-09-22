@@ -76,11 +76,12 @@ let propertyGroup = """  <PropertyGroup>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <NoWarn>3535, 3536</NoWarn>
-</PropertyGroup>"""
+  </PropertyGroup>"""
 let itemGroupStart = """  <ItemGroup>"""
 let itemGroupEnd = """  </ItemGroup>"""
 let compileInclude x = $"""    <Compile Include="{x}" />"""
 let packageReference n v = $"""    <PackageReference Include="{n}" Version="{v}" />"""
+let packageReferenceUpdate n v = $"""    <PackageReference Update="{n}" Version="{v}" />"""
 let projectReference p = $"""    <ProjectReference Include="{p}" />"""
 let xml = [
     [projectStart]
@@ -110,6 +111,10 @@ let xml = [
     [spaceLine]
     [itemGroupStart]
     proj |> foldIList (fun list x -> projectReference x::list) []
+    [itemGroupEnd]
+    [spaceLine]
+    [itemGroupStart]
+    [packageReferenceUpdate "FSharp.Core" "8.0.400"]
     [itemGroupEnd]
     [spaceLine]
     [projectEnd]

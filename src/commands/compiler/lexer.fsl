@@ -15,6 +15,15 @@ let lexeme = LexBuffer<_>.LexemeString
 
 let newline (lexbuf: LexBuffer<_>) = 
   lexbuf.StartPos <- lexbuf.StartPos.NextLine
+
+let ( @+ ) (sb: StringBuilder) (s: string) = sb.Append(s)
+let to_string (sb: StringBuilder) = sb.ToString()
+
+let escape_to_string = function
+| "\\\\" -> "\\"
+| "\\\"" -> "\""
+| "\\n" -> "\n"
+| x -> x
 }
 
 let digit = '\Nd'
@@ -29,7 +38,7 @@ let ident_start = letter | '_'  | '@'
 let connecting_char = '\Pc'
 let combining_char = '\Mn' | '\Mc'
 let formatting_char = '\Cf' 
-let ident_char = letter | digit | connecting_char | combining_char | formatting_char
+let ident_char = letter | digit | connecting_char | combining_char | formatting_char | '\''
 
 let id = ('-' | "--")? ident_start ident_char* 
 
@@ -39,6 +48,8 @@ let op_1 = '*' | '/'
 
 let white = [' ' '\t']+
 let newline = ['\r' '\n' ' ']+
+
+let string_escape = '\\' ['"' '\\' 'n']
 
 rule read =
   parse
@@ -59,7 +70,7 @@ rule read =
   | float    { NUMBER (float (lexeme lexbuf)) }
   | '='      { EQUAL }
   | op_comp  { BINOP_COMP (string (lexeme lexbuf)) }
-  | '"'      { read_string "" false lexbuf } 
+  | '"'      { read_string (StringBuilder()) lexbuf } 
   | '{'      { LEFT_BRACE }
   | '}'      { RIGHT_BRACE }
   | '['      { LEFT_BRACK }
@@ -76,9 +87,9 @@ rule read =
   | _ { raise (Exception (sprintf "SyntaxError: Unexpected char: '%s' Line: %d Column: %d" (lexeme lexbuf) (lexbuf.StartPos.Line + 1) lexbuf.StartPos.Column)) }
 
 
-and read_string (str: string) (ignorequote: bool) =
+and read_string (str: StringBuilder) =
   parse
-  | '"'           { if ignorequote then (read_string (str + "\\\"") false lexbuf) else STRING (str) }
-  | '\\'          { read_string str true lexbuf }
-  | [^ '"' '\\']+ { read_string (str + (lexeme lexbuf)) false lexbuf }
-  | eof           { raise (Exception ("String is not terminated")) }
+  | '"'                     { STRING (to_string str) }
+  | [^ '\n' '\r' '"' '\\']+ { read_string (str @+ (lexeme lexbuf)) lexbuf }
+  | string_escape           { read_string (str @+ (lexeme lexbuf |> escape_to_string)) lexbuf }
+  | eof                     { raise (Exception ("String is not terminated")) }

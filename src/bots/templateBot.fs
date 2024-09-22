@@ -52,6 +52,7 @@ Your system instruction here
                     model = model
                     systemInstruction = systemInstruction |> Some
                     systemInstructionBuilder = Builtin.buildSystemInstruction |> PipeLineChain |> Some
+                    friendStrategy = None
                     contentLoadStrategy = StrategyLoadOnlyMentionedOrPrivate |> Some
                     contentParseStrategy = None
                     messageReplyStrategy = StrategyReplyOnlyMentionedOrPrivate |> Some
@@ -73,17 +74,17 @@ Your system instruction here
             |> ignore
             addCommandExecuters bot [
                 "/", makeExecuterWithBuiltinCommands []
-                "#", AestasScriptExecuter([
+                "#", AestasScriptExecuter [
                     AestasScriptCommands.version()
                     AestasScriptCommands.clear()
                     AestasScriptCommands.help()
                     RegenerateCommand.make()
                     TodaysDietCommand.make()
                     InfoCommand.make()
-                ])
-                ">", ObsoletedCommand.ObsoletedCommandExeuter([
+                ]
+                ">", ObsoletedCommand.ObsoletedCommandExeuter [
                     ObsoletedCommands.commands()
-                ])
+                ]
             ]
             // these plugins could be removed
             addContentParsers bot [

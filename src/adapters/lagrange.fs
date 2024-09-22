@@ -113,7 +113,9 @@ module rec AestasLagrangeBot =
                         Some chain)
                     |> List.rev
                 match chains with
-                | [] -> return Error "Empty message"
+                | [] -> 
+                    logInfo[this] "Empty message, ignored."
+                    return Ok ()
                 | [chain] ->
                     // return value is not useful in private chat
                     let! m = bot.SendMessage chain |> Async.AwaitTask

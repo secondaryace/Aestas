@@ -27,3 +27,4 @@ src/commands/compiler/obj
 aestas.fsproj
 run.sh
 run.ps1
+docs/.load.fsx

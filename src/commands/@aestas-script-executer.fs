@@ -1,5 +1,6 @@
 //! fsproj src/commands/compiler/Aestas.Commands.Compiler.fsproj
 namespace Aestas.Commands
+open System.Collections.Generic
 open FSharp.Text.Lexing
 open Aestas.Commands.Compiler
 open Aestas.Commands.Compiler.Runtime
@@ -14,8 +15,14 @@ module rec AestasScript =
         privilege: CommandPrivilege
         execute: AestasScriptExecuter -> CommandEnvironment -> Context -> Value list -> (Context*Value)
     }
-    type AestasScriptExecuter(commands) =
-        inherit CommandExecuter<AestasScriptCommand>(commands)
+    type AestasScriptExecuter(commands') =
+        inherit CommandExecuter<AestasScriptCommand>(commands')
+        let commands = Dictionary<string, AestasScriptCommand>()
+        do
+            commands' |> List.iter (fun c -> commands.Add(c.name, c))
+        override _.Commands = arrList commands.Values
+        override _.AddCommand cmd =
+            commands.Add(cmd.name, cmd)
         member val Context = { 
             shared = LanguagePrimitives.operators
             binds = Map.empty
@@ -26,10 +33,10 @@ module rec AestasScript =
         override this.Execute env cmd =
             try
                 let binds =
-                    ArrList.fold (fun map cmd -> 
+                    Seq.fold (fun map cmd -> 
                         map |>
                         Map.change cmd.name (fun _ -> cmd.execute this env |> ExternFunction |> Some))
-                        this.Context.binds this.Commands
+                        this.Context.binds commands.Values
                 let parse code = 
                     let lexbuf = LexBuffer<char>.FromString code
                     try

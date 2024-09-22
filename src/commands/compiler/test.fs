@@ -91,9 +91,6 @@ sum (1, 2, 3, 4, 5), sum ("Mai ", "Nemu ", "Isu ", "Anon ", "Chihaya ")
 print (type (1), type (1,), type ())
             """
             """
-print (type (^()), type (^ ()), type (^ 1 2 3), type (^ 1^2 3), type (^ 1 ^ 2 3))
-            """
-            """
 let rev tuple = (
     let go tuple acc = (
         if tuple=() then acc else (
@@ -128,6 +125,9 @@ ls binds
 let fact f n = if n=0 then 1 else (* n (f f (- n 1)) )
 let notY f x = f f x  
 notY fact 5
+            """
+            """
+"abcd\n\\"
             """
         ]
         testCode |> List.iteri (fun i src -> printfn "\n%d:" i; try test src with ex -> printfn "error: %A" ex.Message)

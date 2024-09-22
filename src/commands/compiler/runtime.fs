@@ -112,7 +112,7 @@ module LanguagePrimitives =
                 let ctx, v = exec ctx f [h] in
                 go ctx (v::acc) t in
             go ctx [] vs
-        | _ -> failwitht ctx.trace "Invalid Arguments"
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
     let gt ctx args =
         ctx,
         match args with
@@ -138,7 +138,7 @@ module LanguagePrimitives =
         | [x; Tuple ts] -> x::ts
         | h::t ->
             h::go t
-        | _ -> failwitht ctx.trace "Invalid Arguments" in
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args in
         ctx, Tuple (go args)
     let id ctx args = match args with [x] -> ctx, x | _ -> failwitht ctx.trace "Invalid"
     let type' ctx args =
@@ -158,7 +158,7 @@ module LanguagePrimitives =
             | ExternValue o -> sprintf "extern<%s>" (o.GetType().Name) in
             match args with
             | [x] -> getType x
-            | _ -> failwithf "Invalid type %A" args
+            | _ -> failwithtf ctx.trace "Invalid type %A" args
         )
     let tuple ctx args =
         match args with
@@ -180,16 +180,16 @@ module LanguagePrimitives =
                 ctx, generator a b (if a<b then 1. else -1.) [] |> List.rev |> Tuple
         | [Number a; Number b; Number d] when (a<b && d>0) || (a>b && d<0) ->
             ctx, generator a b d [] |> List.rev |> Tuple
-        | _ -> failwitht ctx.trace "Invalid Arguments"
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
     let rev ctx args =
         match args with
         | [Tuple ls] -> ctx, ls |> List.rev |> Tuple
-        | _ -> failwitht ctx.trace "Invalid Arguments"
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
     let concat ctx args =
         let rec go acc = function
         | [] -> acc
         | Tuple ts::t -> go (ts::acc) t
-        | _ -> failwitht ctx.trace "Invalid Arguments" in
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args in
         ctx, go [] args |> List.rev |> List.concat |> Tuple
     let filter ctx args =
         match args with
@@ -199,7 +199,16 @@ module LanguagePrimitives =
                 | _, Bool b -> b
                 | _ -> failwitht ctx.trace "Predicate should return a bool value"
             ) |> Tuple
-        | _ -> failwitht ctx.trace "Invalid Arguments"
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
+    let choose ctx args =
+        match args with
+        | [Tuple ls] -> 
+            ctx, ls |> List.choose (
+                function
+                | Tuple [] -> None
+                | x -> Some x
+            ) |> Tuple
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
     let partition ctx args =
         match args with
         | [pred; Tuple ls] -> 
@@ -210,12 +219,12 @@ module LanguagePrimitives =
                     | _ -> failwitht ctx.trace "Predicate should return a bool value"
                 ) in
             ctx, Tuple [Tuple a; Tuple b]
-        | _ -> failwitht ctx.trace "Invalid Arguments"
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
     let object ctx args =
         ctx, args |> List.fold (fun map -> 
             function
             | Tuple[String s; v] -> Map.add s v map
-            | _ -> failwitht ctx.trace "Invalid Arguments"
+            | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
         ) Map.empty |> Object
     let makeObject ctx args =
         ctx, 
@@ -224,9 +233,9 @@ module LanguagePrimitives =
             ts |> List.fold (fun map -> 
                 function
                 | Tuple[String s; v] -> Map.add s v map
-                | _ -> failwitht ctx.trace "Invalid Arguments"
+                | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
             ) Map.empty |> Object
-        | _ -> failwitht ctx.trace "Invalid Arguments"
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
     let curry ctx args =
         match args with
         | func::ls -> 
@@ -234,7 +243,7 @@ module LanguagePrimitives =
             ExternFunction (fun ctx args -> 
                 exec ctx func (ls @ args)
             )
-        | _ -> failwitht ctx.trace "Invalid Arguments"
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
     let getField ctx args =
         let getField o s = 
             match Map.tryFind s o with
@@ -242,7 +251,7 @@ module LanguagePrimitives =
             | None -> Tuple [] in
         match args with
         | [Object o; String s] -> ctx,  getField o s
-        | _ -> failwitht ctx.trace "Invalid Arguments"
+        | _ -> failwithtf ctx.trace "Invalid Arguments %A" args
     let ls ctx args =
         match args with
         | [] -> Context.Display ctx true true true |> ctx.print; ctx, Tuple []
@@ -280,6 +289,7 @@ module LanguagePrimitives =
         "seq", ExternFunction seq'
         "rev", ExternFunction rev
         "filter", ExternFunction filter
+        "choose", ExternFunction choose
         "partition", ExternFunction partition
         "concat", ExternFunction concat
         "print", ExternFunction (fun ctx args -> 
@@ -302,10 +312,7 @@ let makeContext shared binds args print trace = {
 let run (ctx: Context) (asts: Ast list) =
     match asts with
     | [Call (Identifier x, [])] -> 
-        match Map.tryFind x ctx.binds with
-        | None -> failwitht ctx.trace "Function not found"
-        | Some x ->
-            exec ctx x []
+        exec ctx (expr ctx (Identifier x) |> snd) []
     | _ ->
         let rec go ctx = function
         | [] -> ctx, Tuple []
