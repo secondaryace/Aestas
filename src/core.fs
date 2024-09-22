@@ -962,7 +962,7 @@ module Builtin =
         execute = fun executer env args ->
             let rec go wl i =
                 if i = args.Length then wl 
-                elif String.startsWith args[i] "-" then
+                elif String.startsWith "-" args[i] then
                     let t = args[i][1..]
                     match 
                         env.domain.Members 
@@ -970,11 +970,11 @@ module Builtin =
                     with
                     | Some mem ->
                         if Set.contains mem.uid wl then
-                            env.log $"Remove member {args[i]}({mem.uid}) from the whitelist";
+                            env.log $"Remove member {t}({mem.uid}) from the whitelist";
                             go (Set.remove mem.uid wl) (i+1)
                         else
-                            env.log $"Member {args[i]} is not in the whitelist"; go wl (i+1)
-                    | _ -> env.log $"Member {args[i]}       not found"; go wl (i+1)
+                            env.log $"Member {t} is not in the whitelist"; go wl (i+1)
+                    | _ -> env.log $"Member {t} not found"; go wl (i+1)
                 else
                     match 
                         env.domain.Members 
@@ -998,7 +998,7 @@ module Builtin =
         execute = fun executer env args ->
             let rec go wl i =
                 if i = args.Length then wl 
-                elif String.startsWith args[i] "-" then
+                elif String.startsWith "-" args[i] then
                     let t = args[i][1..]
                     match 
                         env.domain.Members 
@@ -1006,11 +1006,11 @@ module Builtin =
                     with
                     | Some mem ->
                         if Set.contains mem.uid wl then
-                            env.log $"Remove member {args[i]}({mem.uid}) from the blacklist";
+                            env.log $"Remove member {t}({mem.uid}) from the blacklist";
                             go (Set.remove mem.uid wl) (i+1)
                         else
-                            env.log $"Member {args[i]} is not in the blacklist"; go wl (i+1)
-                    | _ -> env.log $"Member {args[i]} not found"; go wl (i+1)
+                            env.log $"Member {t} is not in the blacklist"; go wl (i+1)
+                    | _ -> env.log $"Member {t} not found"; go wl (i+1)
                 else
                     match 
                         env.domain.Members 

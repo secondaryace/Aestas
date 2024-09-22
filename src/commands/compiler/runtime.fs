@@ -171,7 +171,7 @@ module LanguagePrimitives =
             else generator (curr+delta) target delta (Number curr::acc) in
         match args with
         | [Number a; Number b] -> 
-            if a = b then ctx, Tuple [Number a]
+            if a = b then ctx, Tuple []
             elif Math.Truncate a = a && Math.Truncate b = b then
                 // generator returns reverse sequence, sometimes we can make use of it
                 if a < b then ctx, generator (b-1.) (a-1.) -1. [] |> Tuple
