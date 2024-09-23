@@ -1,6 +1,10 @@
 open System
 open System.IO
 open System.Collections.Generic
+
+let settings = fsi.CommandLineArgs[1..]
+let profile = if settings |> Array.contains "--debug" then "Debug" else "Release"
+let verbose = settings |> Array.contains "--verbose"
 let getFiles path = 
     if Directory.Exists path then
         let files = Directory.GetFiles path 
@@ -51,31 +55,32 @@ let findRef (reader: StreamReader) =
     let rec go() =
         let line = reader.ReadLine()
         if line |> String.IsNullOrEmpty |> not && line.StartsWith "//!" then
-            printfn "Finded ref: %s" line
+            if verbose then printfn "Finded ref: %s" line
             parseRef line
             go()
         else ()
     go()
 all |> Array.iter (
     fun x -> 
-        printfn "Finded file: %s" x
+        if verbose then printfn "Finded file: %s" x
         use reader = new StreamReader(x)
         findRef reader
         )
-printfn "Project references: %A" proj
-printfn "PackageReference: %A" nuget
-let settings = fsi.CommandLineArgs[1..]
+if verbose then printfn "Project references: %A" proj
+if verbose then printfn "Package references: %A" nuget
 let spaceLine = ""
 let projectStart = """<Project Sdk="Microsoft.NET.Sdk">"""
 let projectEnd = """</Project>"""
-let propertyGroup = """  <PropertyGroup>
-    <OutputType>Exe</OutputType>
+let propertyGroup outputType outputPath cargs = $"""  <PropertyGroup>
+    <OutputType>{outputType}</OutputType>
     <TargetFramework>net8.0</TargetFramework>
     <InvariantGlobalization>true</InvariantGlobalization>
     <LangVersion>preview</LangVersion>
     <PlatformTarget>AnyCPU</PlatformTarget>
     <ServerGarbageCollection>true</ServerGarbageCollection>
     <NoWarn>3535, 3536</NoWarn>
+    <BaseOutputPath>{outputPath}</BaseOutputPath>
+    <OtherFlags>{cargs}</OtherFlags>
   </PropertyGroup>"""
 let itemGroupStart = """  <ItemGroup>"""
 let itemGroupEnd = """  </ItemGroup>"""
@@ -83,10 +88,13 @@ let compileInclude x = $"""    <Compile Include="{x}" />"""
 let packageReference n v = $"""    <PackageReference Include="{n}" Version="{v}" />"""
 let packageReferenceUpdate n v = $"""    <PackageReference Update="{n}" Version="{v}" />"""
 let projectReference p = $"""    <ProjectReference Include="{p}" />"""
-let xml = [
+let dllReference n p = $"""    <Reference Include="{n}">
+      <HintPath>{p}</HintPath>
+    </Reference>"""
+let coreXml = [
     [projectStart]
     [spaceLine]
-    [propertyGroup]
+    [propertyGroup "Library" "bin/core/" "--allsigs --test:GraphBasedChecking --test:ParallelOptimization --test:ParallelIlxGen"]
     [spaceLine]
     [itemGroupStart]
     [
@@ -94,6 +102,24 @@ let xml = [
         "core.fs" |> src |> compileInclude
         "auto-init.fs" |> src |> compileInclude
     ]
+    [itemGroupEnd]
+    [spaceLine]
+    [itemGroupStart]
+    [packageReference "FSharp.SystemTextJson" "1.3.13"]
+    [itemGroupEnd]
+    [spaceLine]
+    [itemGroupStart]
+    [packageReferenceUpdate "FSharp.Core" "8.0.400"]
+    [itemGroupEnd]
+    [spaceLine]
+    [projectEnd]
+]
+let launchXml = [
+    [projectStart]
+    [spaceLine]
+    [propertyGroup "Exe" "bin" "--test:GraphBasedChecking --test:ParallelOptimization --test:ParallelIlxGen"]
+    [spaceLine]
+    [itemGroupStart]
     misc |> foldIList (fun list x -> compileInclude x::list) []
     llms |> foldIList (fun list x -> compileInclude x::list) []
     adapters |> foldIList (fun list x -> compileInclude x::list) []
@@ -114,13 +140,19 @@ let xml = [
     [itemGroupEnd]
     [spaceLine]
     [itemGroupStart]
+    [dllReference "Aestas.Core" $"bin/core/{profile}/net8.0/Aestas.Core.dll"]
+    [itemGroupEnd]
+    [itemGroupStart]
     [packageReferenceUpdate "FSharp.Core" "8.0.400"]
     [itemGroupEnd]
     [spaceLine]
     [projectEnd]
 ]
-let xmlString = xml |> List.collect id |> String.concat "\n"
-let writer = new StreamWriter("aestas.fsproj")
-writer.Write(xmlString)
-writer.Close()
-printfn "Generated aestas.fsproj"
+let xmlString xml = xml |> List.collect id |> String.concat "\n"
+let write (path: String) (str: string) =
+    use writer = new StreamWriter(path)
+    writer.Write str
+    writer.Flush()
+    printfn "Generated %s" path
+if settings |> Array.contains "--nocore" |> not then coreXml |> xmlString |> write "Aestas.Core.fsproj"
+launchXml |> xmlString |> write "aestas.fsproj"

@@ -1,3 +1,4 @@
+//! nuget FsLexYacc=11.3.0
 //! fsproj src/commands/compiler/Aestas.Commands.Compiler.fsproj
 namespace Aestas.Commands
 open System.Collections.Generic
@@ -13,8 +14,12 @@ module rec AestasScript =
         description: string
         accessibleDomain: CommandAccessibleDomain
         privilege: CommandPrivilege
-        execute: AestasScriptExecuter -> CommandEnvironment -> Context -> Value list -> (Context*Value)
+        execute: AestasScriptExecuter -> CommandEnvironment -> Context -> Value list -> Context * Value
     }
+    let privWrapper cmd executer (env: CommandEnvironment) ctx args =
+        if env.privilege < cmd.privilege then
+            env.log "Permission denied"; ctx, Tuple []
+        else cmd.execute executer env ctx args
     type AestasScriptExecuter(commands') =
         inherit CommandExecuter<AestasScriptCommand>(commands')
         let commands = Dictionary<string, AestasScriptCommand>()
@@ -35,7 +40,7 @@ module rec AestasScript =
                 let binds =
                     Seq.fold (fun map cmd -> 
                         map |>
-                        Map.change cmd.name (fun _ -> cmd.execute this env |> ExternFunction |> Some))
+                        Map.change cmd.name (fun _ -> privWrapper cmd this env |> ExternFunction |> Some))
                         this.Context.binds commands.Values
                 let parse code = 
                     let lexbuf = LexBuffer<char>.FromString code

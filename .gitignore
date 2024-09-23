@@ -25,6 +25,7 @@ src/web/Aestas.WebUI/.vs
 src/commands/compiler/bin
 src/commands/compiler/obj
 aestas.fsproj
+Aestas.Core.fsproj
 run.sh
 run.ps1
 docs/.load.fsx

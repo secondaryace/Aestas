@@ -4,15 +4,19 @@ param (
     [string]
     $target
 )
+$prof = if ($args.Contains('--debug')) { 'Debug' } else { 'Release' }
+$nocore = $args.Contains('--nocore')
 if ($target -eq 'build')
 {
     dotnet fsi prepare.fsx $args
-    dotnet build --configuration Release
+    if (!$nocore) { dotnet build ./Aestas.Core.fsproj --configuration $prof }
+    dotnet build ./aestas.fsproj --configuration $prof
 }
 elseif ($target -eq 'test')
 {
     dotnet fsi prepare.fsx $args
-    dotnet run
+    if (!$nocore) { dotnet build ./Aestas.Core.fsproj --configuration Debug }
+    dotnet run --project ./aestas.fsproj
 }
 elseif ($target -eq 'prepare')
 {
@@ -22,8 +26,8 @@ elseif ($target -eq 'run') {
     dotnet bin/Release/net8.0/aestas.dll
 }
 elseif ($target -eq 'clean') {
-    dotnet clean
+    dotnet clean ./aestas.fsproj
 }
 else {
-    Write-Output "Usage: aestas.ps1 [build|test|fsproj|run|clean] [--nocli]"
+    Write-Output "Usage: aestas.ps1 [build|test|fsproj|run|clean] [--nocli] [--nocore]"
 }

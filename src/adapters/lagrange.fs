@@ -114,7 +114,7 @@ module rec AestasLagrangeBot =
                     |> List.rev
                 match chains with
                 | [] -> 
-                    logInfo[this] "Empty message, ignored."
+                    logInfof[0] "Lagrange@%d: Empty message, ignored." gid
                     return Ok ()
                 | [chain] ->
                     // return value is not useful in private chat
@@ -341,7 +341,7 @@ module rec AestasLagrangeBot =
                             match chat.Bot with
                             | None -> ()
                             | Some bot ->
-                                [AestasText "(poke you)"] |> Some |> bot.SelfTalk chat |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
+                                [AestasText "（戳了戳你）"] |> Some |> bot.SelfTalk chat |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
                     )
                 ) |> bot.Invoker.add_OnFriendPokeEvent
                 (fun _ (event: EventArg.GroupPokeEvent) -> 

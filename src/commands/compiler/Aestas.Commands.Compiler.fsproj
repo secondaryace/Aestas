@@ -2,6 +2,7 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net8.0</TargetFramework>
+    <OtherFlags>--test:GraphBasedChecking --test:ParallelOptimization --test:ParallelIlxGen</OtherFlags>
   </PropertyGroup>
   <ItemGroup>
     <Compile Include="language.fs" />

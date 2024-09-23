@@ -9,7 +9,7 @@ open System.Text.Unicode
 open System.Net.Http
 
 module Prim = 
-    let version = Version(0, 240919)
+    let version = Version(0, 240923)
     #if DEBUG
     let debug = true
     #else
@@ -216,6 +216,8 @@ module Prim =
             match dict |> tryFind predicate with
             | Some x -> x
             | None -> failwith "Not found"
+        let inline tryGetValue (key: 'k) (dict: IReadOnlyDictionary<'k, 'v>) =
+            if dict.ContainsKey key then Some dict[key] else None
         
     type Collections.Generic.Dictionary<'k, 'v> with
         member inline this.Append(d: IReadOnlyDictionary<'k, 'v>) =

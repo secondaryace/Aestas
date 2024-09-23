@@ -12,7 +12,7 @@ open Aestas.Prim
 
 module TextToImage =
     type ImageResolutions = {resolutions: Dictionary<string, int*int>}
-    let textToImageParser textToImgMethod: (ContentParser*string*(AestasBot -> StringBuilder -> unit)) =
+    let makeTextToImageParser textToImgMethod: (ContentParser*string*(AestasBot -> StringBuilder -> unit)) =
         fun bot domain params' content ->
             match bot.TryGetExtraData("imageResolutions"), params' with
             | Some (:? ImageResolutions as ress), ["res", res] when ress.resolutions.ContainsKey res -> 

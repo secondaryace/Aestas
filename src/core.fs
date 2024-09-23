@@ -6,7 +6,6 @@ open System.Text.Json
 open System.Text.RegularExpressions
 open System.Linq
 open System.Reflection
-open FSharpPlus
 open System
 open Prim
 
@@ -238,6 +237,8 @@ type AestasBot() =
             if value.DomainId = domainId then this.BindDomain value
             else failwith "Domain ID mismatch"
     member this.Domains = groups :> IReadOnlyDictionary<uint32, AestasChatDomain> 
+    member val ModelInputConverter = Builtin.modelInputConverters with get, set
+    member val ModelOutputParser = Builtin.modelOutputParser with get, set
     member val FriendStrategy = StrategyFriendAll with get, set
     member val ContentLoadStrategy = StrategyLoadAll with get, set
     member val MessageReplyStrategy = StrategyReplyNone with get, set
@@ -486,6 +487,7 @@ type CommandPrivilege =
     | BelowNormal = 0
     | Normal = 1
     | High = 2
+    | AboveHigh = 3
 type CommandEnvironment = {
     bot: AestasBot
     domain: AestasChatDomain
@@ -700,7 +702,18 @@ module ConsoleBot =
             member this.InitDomainView bot domainId = this.InitDomainView(bot, domainId)
     let singleton = ConsoleChat()
 module Builtin =
-    // f >> g, AutoInit.inputConverters >> (Builtin.inputConverters messages)
+    let inline toString (o: obj) =
+        match o with
+        | :? int as i -> i.ToString()
+        | :? float as f -> f.ToString()
+        | :? single as f -> f.ToString()
+        | :? bool as b -> b.ToString()
+        | :? char as c -> c.ToString()
+        | :? byte as b -> b.ToString()
+        | :? sbyte as b -> b.ToString()
+        | :? string as s -> s
+        | :? Type as t -> t.Name
+        | _ -> o.GetType().Name
     let rec modelInputConverters (domain: AestasChatDomain) = function
     | AestasText x -> x
     | AestasImage _ -> "#[image: not supported]"
@@ -748,7 +761,7 @@ module Builtin =
                 cache.Clear() |> ignore
                 let i, pr, _ = scanParam (i+1) ("", "")
                 scanBracket 1 i v f (pr::p)
-            | '@' when s < 1 ->
+            | '@' when s = 1 ->
                 let i, pr, _ = scanParam (i+1) ("", "")
                 scanBracket 1 i v f (pr::p)
             | ':' when s < 2 -> 
@@ -918,16 +931,16 @@ module Builtin =
             args |> Array.iter (fun x -> sb.Append x |> ignore)
             sb.ToString() |> env.log
         }
-    let chfrwlCommand() = {
-        name = "chfrwl"
-        description = "Check Friend White List"
+    let lsfrwlCommand() = {
+        name = "lsfrwl"
+        description = "List Friend White List"
         accessibleDomain = CommandAccessibleDomain.All
-        privilege = CommandPrivilege.Normal
+        privilege = CommandPrivilege.High
         execute = fun executer env args ->
             match env.bot.FriendStrategy with
             | StrategyFriendWhitelist wl ->
                 let sb = StringBuilder()
-                sb.Append "## White List" |> ignore
+                sb.AppendLine "## White List" |> ignore
                 if wl.ContainsKey env.domain.DomainId then
                     wl[env.domain.DomainId] |> Set.iter (fun x -> 
                         match env.domain.Members |> Array.tryFind (fun y -> y.uid = x) with
@@ -936,16 +949,16 @@ module Builtin =
                 sb.ToString() |> env.log
             | _ -> env.log "FriendStrategy not supported"
         }
-    let chfrblCommand() = {
-        name = "chfrbl"
-        description = "Check Friend Black List"
+    let lsfrblCommand() = {
+        name = "lsfrbl"
+        description = "List Friend Black List"
         accessibleDomain = CommandAccessibleDomain.All
-        privilege = CommandPrivilege.Normal
+        privilege = CommandPrivilege.High
         execute = fun executer env args ->
             match env.bot.FriendStrategy with
             | StrategyFriendBlacklist bl ->
                 let sb = StringBuilder()
-                sb.Append "## Black List" |> ignore
+                sb.AppendLine "## Black List" |> ignore
                 if bl.ContainsKey env.domain.DomainId then
                     bl[env.domain.DomainId] |> Set.iter (fun x -> 
                         match env.domain.Members |> Array.tryFind (fun y -> y.uid = x) with
@@ -958,11 +971,11 @@ module Builtin =
         name = "ufrwl"
         description = "Update Friend White List"
         accessibleDomain = CommandAccessibleDomain.All
-        privilege = CommandPrivilege.Normal
+        privilege = CommandPrivilege.High
         execute = fun executer env args ->
             let rec go wl i =
                 if i = args.Length then wl 
-                elif String.startsWith "-" args[i] then
+                elif args[i].StartsWith "-" then
                     let t = args[i][1..]
                     match 
                         env.domain.Members 
@@ -994,11 +1007,11 @@ module Builtin =
         name = "ufrbl"
         description = "Update Friend Black List"
         accessibleDomain = CommandAccessibleDomain.All
-        privilege = CommandPrivilege.Normal
+        privilege = CommandPrivilege.High
         execute = fun executer env args ->
             let rec go wl i =
                 if i = args.Length then wl 
-                elif String.startsWith "-" args[i] then
+                elif args[i].StartsWith "-"  then
                     let t = args[i][1..]
                     match 
                         env.domain.Members 
@@ -1032,8 +1045,8 @@ module Builtin =
             clearCommand()
             helpCommand()
             echoCommand()
-            chfrwlCommand()
-            chfrblCommand()
+            lsfrwlCommand()
+            lsfrblCommand()
             ufrwlCommand()
             ufrblCommand()
         ]
