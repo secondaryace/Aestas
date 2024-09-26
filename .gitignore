@@ -24,8 +24,15 @@ src/web/Aestas.WebUI/bin
 src/web/Aestas.WebUI/.vs
 src/commands/compiler/bin
 src/commands/compiler/obj
+src/commands/compiler/parser.fs
+src/commands/compiler/parser.fsi
+src/commands/compiler/lexer.fs
+src/commands/compiler/lexer.fsi
 aestas.fsproj
 Aestas.Core.fsproj
 run.sh
 run.ps1
 docs/.load.fsx
+src/prim.fsi
+src/auto-init.fsi
+src/core.fsi

@@ -50,9 +50,24 @@ module rec AestasLagrangeBot =
         member this.ParseLagrangeEntity (entity: IMessageEntity) =
             match entity with
             | :? TextEntity as t -> AestasText t.Text
-            | :? ImageEntity as i -> AestasImage (i.ImageUrl |> bytesFromUrl, "image/jpeg", int i.PictureSize.X, int i.PictureSize.Y)
-            | :? RecordEntity as a -> AestasAudio (a.AudioUrl |> bytesFromUrl, "audio/amr", a.AudioLength)
-            | :? VideoEntity as v -> AestasVideo (v.VideoUrl |> bytesFromUrl, "") 
+            | :? ImageEntity as i -> 
+                AestasImage {|
+                    data = i.ImageUrl |> bytesFromUrl
+                    mimeType = "image/jpeg"
+                    width = int i.PictureSize.X; height = int i.PictureSize.Y
+                    |}
+            | :? RecordEntity as a -> 
+                AestasAudio {|
+                    data = a.AudioUrl |> bytesFromUrl
+                    mimeType = "audio/mpeg"
+                    duration = a.AudioLength
+                    |}
+            | :? VideoEntity as v -> 
+                AestasVideo {|
+                    data = v.VideoUrl |> bytesFromUrl
+                    mimeType = "video/mp4"
+                    duration = v.VideoLength
+                    |}
             | :? MentionEntity as m -> 
                 AestasMention {uid = m.Uin; name = m.Name.Substring(1)}
             | :? ForwardEntity as f ->
@@ -60,7 +75,15 @@ module rec AestasLagrangeBot =
                     |> ArrList.tryFindBack (fun m -> (m :?> LagrangeMessage).Sequence = f.Sequence) with
                 | Some m -> AestasQuote m.MessageId
                 | None -> AestasText "#[quote: not found]"
-            | _ -> AestasText "not supported"
+            | :? PokeEntity as p -> AestasText "（戳了戳你）"
+            | :? MultiMsgEntity as ms -> 
+                let col = LagrangeMessageCollection this
+                ms.Chains 
+                |> Seq.map (fun c ->
+                    LagrangeMessage(col, c, c.FriendUin = bot.BotUin) :> IMessageAdapter)
+                |> col.AddRange
+                AestasFold col
+            | _ -> AestasText "unsupported"
         member this.ParseLagrangeMessage (entities: IMessageEntity list) =
             match entities with
             | (:? MarketfaceEntity)::(:? TextEntity as t)::_ -> [AestasText $"#[sticker:{t.Text.Trim('[', ']')}]"]
@@ -70,19 +93,19 @@ module rec AestasLagrangeBot =
             match contents, acc with
             | [], acc -> acc
             | AestasBlank::r, _ ->  this.ParseAestasContents r acc
-            | AestasAudio (bs, mime, duration)::r, _ ->
+            | AestasAudio x::r, _ ->
                 // make the next entity do not follow record 
-                this.ParseAestasContents r ([]::[new RecordEntity(bs, duration)]::acc)
-            | AestasVideo (bs, mime)::r, _ -> 
-                this.ParseAestasContents r ([]::[new VideoEntity(bs)]::acc)
+                this.ParseAestasContents r ([]::[new RecordEntity(x.data, x.duration)]::acc)
+            | AestasVideo x::r, _ -> 
+                this.ParseAestasContents r ([]::[new VideoEntity(x.data, x.duration)]::acc)
             | AestasText t::r, [] ->
                 this.ParseAestasContents r [[new TextEntity(t)]]
             | AestasText t::r, head::tail ->
                 this.ParseAestasContents r ((new TextEntity(t)::head)::tail)
-            | AestasImage (bs, mime, w, h)::r, [] ->
-                this.ParseAestasContents r [[new ImageEntity(bs)]]
-            | AestasImage (bs, mime, w, h)::r, head::tail -> 
-                this.ParseAestasContents r ((new ImageEntity(bs)::head)::tail)
+            | AestasImage x::r, [] ->
+                this.ParseAestasContents r [[new ImageEntity(x.data)]]
+            | AestasImage x::r, head::tail -> 
+                this.ParseAestasContents r ((new ImageEntity(x.data)::head)::tail)
             | AestasMention m::r, [] ->
                 this.ParseAestasContents r [[new MentionEntity("@"+(cachedMembers 
                     |> Array.find (fun m' -> m'.uid = m.uid)).name, m.uid)]] 
@@ -91,16 +114,41 @@ module rec AestasLagrangeBot =
                     new MentionEntity("@"+(cachedMembers 
                         |> Array.find (fun m' -> m'.uid = m.uid)).name, m.uid)
                 this.ParseAestasContents r ((at::head)::tail)
-            | _ -> this.ParseAestasContents contents ((new TextEntity("not supported")::acc.Head)::acc.Tail)
+            | AestasFile x::r, [] ->
+                let file = new FileEntity(x.data, x.fileName)
+                if private' then
+                    bot.UploadFriendFile(gid, file) |> ignore
+                else
+                    bot.GroupFSUpload(gid, file) |> ignore
+                this.ParseAestasContents r acc
+            | ProtocolContent x::r, [] ->
+                match x.funcName with
+                | "poke" -> 
+                    if private' then bot.FriendPoke(gid) |> ignore
+                    else
+                        match cachedMembers |> Array.tryFind (fun m -> m.name = x.content) with
+                        | Some m -> bot.GroupPoke(gid, m.uid) |> ignore
+                        | None -> ()
+                    this.ParseAestasContents r acc
+                | _ -> this.ParseAestasContents r ([]::[new TextEntity("<unsupported pcontent>")]::acc)
+            | _::r, _ -> this.ParseAestasContents r ([]::[new TextEntity("<unsupported content>")]::acc)
         member val MessageCacheQueue = List<(IMessageAdapter -> unit)*uint32>() with get, set
         
-        override this.SendFile data fileName =
-            async {
-                let chain = (if private' then MessageBuilder.Friend(gid) else MessageBuilder.Group(gid)).Build()
-                chain.Add(new FileEntity(data, fileName))
-                let! m = bot.SendMessage chain |> Async.AwaitTask
-                return Ok ()
-            }
+        // override this.SendFile data fileName =
+        //     async {
+        //         let chain = (if private' then MessageBuilder.Friend(gid) else MessageBuilder.Group(gid)).Build()
+        //         chain.Add(new FileEntity(data, fileName))
+        //         let! m = bot.SendMessage chain |> Async.AwaitTask
+        //         return Ok ()
+        //     }
+        override this.Bind bot =
+            bot.ProtocolContents.Add(this.DomainId, dict' [
+                "poke", fun bot sb -> sb.Append("你可以戳戳别人，通过这样的方式 #[poke: name].") |> ignore
+                ])
+            base.Bind bot
+        override this.UnBind bot =
+            bot.ProtocolContents.Remove this.DomainId |> ignore
+            base.UnBind bot
         override this.Send callback contents = 
             async {
                 let msgs = this.ParseAestasContents contents []
@@ -345,14 +393,20 @@ module rec AestasLagrangeBot =
                     )
                 ) |> bot.Invoker.add_OnFriendPokeEvent
                 (fun _ (event: EventArg.GroupPokeEvent) -> 
-                    privateChats
+                    groupChats
                     |> Seq.iter (fun pair -> 
                         if pair.Value.ContainsKey(event.GroupUin) then
                             let chat = pair.Value[event.GroupUin]
                             match chat.Bot with
                             | None -> ()
                             | Some bot ->
-                                [AestasText "(poke you)"] |> Some |> bot.SelfTalk chat |> Async.RunSynchronously |> ignore// notice: shouldnt ignore
+                                chat.Members 
+                                |> Array.tryFind (fun m -> m.uid = event.OperatorUin)
+                                |> Option.iter (fun m ->
+                                    m.name
+                                    |> sprintf "（%s戳了戳你）"
+                                    |>  AestasText |> List.singleton |> Some 
+                                    |> bot.SelfTalk chat |> Async.RunSynchronously |> ignore)// notice: shouldnt ignore
                     )
                 ) |> bot.Invoker.add_OnGroupPokeEvent
             member _.FetchDomains() = 

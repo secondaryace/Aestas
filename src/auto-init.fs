@@ -16,12 +16,10 @@ module AutoInit =
     let private _protocols = Dictionary<Type, IProtocolAdapter>()
     let private _bots = arrList<AestasBot>()
     let private _mappingContentCtorTips = Dictionary<Type, ContentParser*string*(AestasBot -> StringBuilder -> unit)>()
-    let private _protocolContentCtorTips = Dictionary<Type, ProtocolSpecifyContentCtor*string*(AestasBot->string)>()
     let private _commands = Dictionary<Type, CommandExecuter>()
     let bots = _bots :> IReadOnlyList<AestasBot>
     let protocols = _protocols :> IReadOnlyDictionary<Type, IProtocolAdapter>
     let mappingContentCtorTips = _mappingContentCtorTips :> IReadOnlyDictionary<Type, ContentParser*string*(AestasBot -> StringBuilder -> unit)>
-    let protocolContentCtorTips = _protocolContentCtorTips :> IReadOnlyDictionary<Type, ProtocolSpecifyContentCtor*string*(AestasBot->string)>
     let commands = _commands :> IReadOnlyDictionary<Type, CommandExecuter>
     let inline invokeInit<'t, 'tArg> (t: Type) (arg: 'tArg) =
         t.GetInterfaceMap(typeof<IAutoInit<'t, 'tArg>>).TargetMethods[0].Invoke(null, [|arg|]) :?> 't
@@ -37,18 +35,12 @@ module AutoInit =
         match mappingContentCtorTips |> Dict.tryFind (fun k v -> k.Name = s) with
         | Some (k, v) -> Some v
         | None -> None
-    let inline tryGetProtocolContentCtorTip s =
-        match protocolContentCtorTips |> Dict.tryFind (fun k v -> k.Name = s) with
-        | Some (k, v) -> Some v
-        | None -> None
     let inline getCommandExecuter<'t when 't :> CommandExecuter> () = 
         if commands.ContainsKey typeof<'t> then commands[typeof<'t>] else failwith $"Command Executer {toString typeof<'t>} not found"
     let inline getProtocol<'t when 't :> IProtocolAdapter> () =
         if protocols.ContainsKey typeof<'t> then protocols[typeof<'t>] else failwith $"Protocol {toString typeof<'t>} not found"
     let inline getContentParser<'t when 't :> IAutoInit<string*ContentParser*(AestasBot -> StringBuilder -> unit), unit>> () =
         if mappingContentCtorTips.ContainsKey typeof<'t> then mappingContentCtorTips[typeof<'t>] else failwith $"ContentParser {toString typeof<'t>} not found"
-    let inline getProtocolContentCtorTip<'t when 't :> IProtocolSpecifyContent> () =
-        if protocolContentCtorTips.ContainsKey typeof<'t> then protocolContentCtorTips[typeof<'t>] else failwith $"ProtocolContentCtor {toString typeof<'t>} not found"
     type InitTypes =
         | Ignore = 101
         | Bot = 100
@@ -85,11 +77,6 @@ module AutoInit =
                     let bot = invokeInit t' ()
                     logInfo["AutoInit"] $"Initialized bot {(bot: AestasBot).Name}"
                     _bots.Add bot
-            | [|t; targ|] when t = typeof<string*ProtocolSpecifyContentCtor*(AestasBot -> string)> && targ = typeof<unit> -> 
-                InitTypes.ProtocolPlugin, fun () ->
-                    let name, ctor, tip = invokeInit t' ()
-                    logInfo["AutoInit"] $"Initialized content plugin {toString t'}"
-                    _protocolContentCtorTips.TryAdd(t', (ctor, name, tip)) |> ignore
             | [|t; targ|] when t = typeof<string*ContentParser*(AestasBot -> StringBuilder -> unit)> && targ = typeof<unit> -> 
                 InitTypes.ContentParser, fun () ->
                     let name, ctor, tip = invokeInit t' ()
@@ -116,7 +103,6 @@ module AutoInit =
             _protocols.Clear()
             _commands.Clear()
             _mappingContentCtorTips.Clear()
-            _protocolContentCtorTips.Clear()
             _init initTypes
         | _, None -> _init initTypes
         | _ -> ()

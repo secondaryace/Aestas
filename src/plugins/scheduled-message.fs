@@ -31,5 +31,5 @@ module ScheduledMessage =
             | _ -> Error "Invalid parameters"
         , "remind-me"
         , fun bot sb ->
-            sb.AppendLine("You may use remind-me to remind yourself at a specific time like #[remind-me@afterhour=hour@aftermin=minute:content].") |> ignore
+            sb.AppendLine("You may use remind-me to set a alarm for yourself, like #[remind-me@afterhour=hour@aftermin=minute:content].") |> ignore
             sb.Append("e.g. #[remind-me@afterhour=1@aftermin=10:Say good morning to everyone].") |> ignore

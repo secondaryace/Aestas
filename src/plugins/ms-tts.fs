@@ -62,7 +62,11 @@ module MsTts =
                     match bot.TryGetExtraData("mstts") with
                     | Some (:? MsTts_Profile as profile) -> 
                         match params' |> List.rev |> getVoice profile with
-                        | Ok voice -> AestasAudio(voice, getMime profile.outputFormat, getDuration profile.outputFormat voice) |> Ok
+                        | Ok voice -> 
+                            AestasAudio{|
+                                data = voice;
+                                mimeType = getMime profile.outputFormat;
+                                duration = getDuration profile.outputFormat voice|} |> Ok
                         | Error emsg -> Error emsg
                     | _ -> Error "Couldn't find mstts data"
                 , fun bot builder ->

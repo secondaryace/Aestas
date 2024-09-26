@@ -9,14 +9,14 @@ $nocore = $args.Contains('--nocore')
 if ($target -eq 'build')
 {
     dotnet fsi prepare.fsx $args
-    if (!$nocore) { dotnet build ./Aestas.Core.fsproj --configuration $prof }
-    dotnet build ./aestas.fsproj --configuration $prof
+    if (!$nocore -and $LASTEXITCODE -eq 0) { dotnet build ./Aestas.Core.fsproj --configuration $prof }
+    if ($LASTEXITCODE -eq 0) { dotnet build ./aestas.fsproj --configuration $prof }
 }
 elseif ($target -eq 'test')
 {
     dotnet fsi prepare.fsx $args
-    if (!$nocore) { dotnet build ./Aestas.Core.fsproj --configuration Debug }
-    dotnet run --project ./aestas.fsproj
+    if (!$nocore -and $LASTEXITCODE -eq 0) { dotnet build ./Aestas.Core.fsproj --configuration Debug }
+    if ($LASTEXITCODE -eq 0) { dotnet run --project ./aestas.fsproj }
 }
 elseif ($target -eq 'prepare')
 {

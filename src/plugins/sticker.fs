@@ -24,7 +24,10 @@ module Sticker =
                         let sticker = profile.stickers[content]
                         if cache.ContainsKey sticker.path |> not then
                             cache.Add(sticker.path, File.ReadAllBytes sticker.path)
-                        AestasImage(cache[sticker.path], $"image/{sticker.path.Split('.')[^0]}", sticker.width, sticker.height) |> Ok
+                        AestasImage{|
+                            data = cache[sticker.path];
+                            mimeType = $"image/{sticker.path.Split('.')[^0]}";
+                            width = sticker.width; height = sticker.height|} |> Ok
                     | Some (:? Strickers as _) -> Error $"Couldn't find sticker {content}"
                     | _ -> Error "Couldn't find stickers data"
                 , fun bot sb ->

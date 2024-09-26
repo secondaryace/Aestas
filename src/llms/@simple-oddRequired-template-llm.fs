@@ -21,6 +21,8 @@ module SimpleOddRequiredTemplateLlm =
         let buildMessageString domain content = 
             content |> List.map (Builtin.modelInputConverters domain) |> String.concat " "
         interface ILanguageModelClient with
+            member _.Bind bot = ()
+            member _.UnBind bot = ()
             member this.CacheContents bot domain contents =
                 if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList())
                 if contentsCache[domain].Count <> 0 && (fst' (contentsCache[domain][^0])).Role = userRole then
@@ -56,7 +58,7 @@ module SimpleOddRequiredTemplateLlm =
                     if response.IsSuccessStatusCode then
                         let! result = response.Content.ReadAsStringAsync() |> Async.AwaitTask
                         //Logger.logInfo[0] (jsonSerialize result)
-                        let reply = getReplyFromResponse result |> Builtin.modelOutputParser bot domain
+                        let reply = getReplyFromResponse result |> bot.ModelOutputParser bot domain
                         return Ok reply, 
                         fun msg ->
                             match contentsCache[domain] |> ArrList.tryFindIndexBack (fun struct(_, x) -> x = cachedMid) with

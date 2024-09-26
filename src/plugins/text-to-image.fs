@@ -26,7 +26,10 @@ module TextToImage =
                 Logger.logInfo[0] (sprintf "t2i: %A" argument)
                 match textToImgMethod argument |> Async.RunSynchronously with
                 | Ok bytes ->
-                    AestasImage(bytes, "image/png", fst res, snd res) |> Ok
+                    AestasImage{|
+                        data = bytes
+                        mimeType = "image/png"
+                        width = fst res; height = snd res|} |> Ok
                 | Error e -> Error e
             | Some (:? ImageResolutions), _ -> Error $"Couldn't find resolution {content}"
             | _ -> Error "Couldn't find imageResolutions data"

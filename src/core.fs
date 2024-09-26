@@ -89,6 +89,8 @@ type IProtocolAdapter =
 // Use abstract class rather than interface to provide default implementation
 [<AbstractClass>]
 type AestasChatDomain() =
+    abstract member Bind: AestasBot -> unit
+    abstract member UnBind: AestasBot -> unit
     abstract member Messages: IMessageAdapterCollection with get
     abstract member Private: bool with get
     abstract member DomainId: uint32 with get
@@ -97,14 +99,14 @@ type AestasChatDomain() =
     abstract member Members: AestasChatMember[] with get
     abstract member Bot: AestasBot option with get, set
     abstract member Send: callback: (IMessageAdapter -> unit) -> contents: AestasContent list -> Async<Result<unit, string>>
-    abstract member SendFile: data: byte[] -> fileName: string -> Async<Result<unit, string>>
     abstract member Recall: messageId: uint64 -> Async<bool>
     abstract member Name: string with get
     abstract member OnReceiveMessage: IMessageAdapter -> Async<Result<unit, string>>
-    default this.SendFile data fileName =
-        async {
-            return Error "Not implemented"
-        }
+    abstract member MakeFoldMessage: AestasContent list list -> IMessageAdapterCollection
+    default this.Bind bot = 
+        this.Bot <- Some bot
+    default this.UnBind bot =
+        this.Bot <- None
     default this.OnReceiveMessage msg = 
         async {
             match this.Bot with
@@ -130,6 +132,8 @@ type AestasChatDomain() =
         async {
             return false
         }
+    default this.MakeFoldMessage contents =
+        raise <| NotImplementedException()
 type AestasChatDomains = Dictionary<uint32, AestasChatDomain>
 type BotContentLoadStrategy =
     /// Load anything as plain text
@@ -199,14 +203,16 @@ type AestasContent =
     | AestasBlank
     | AestasText of string 
     /// byte array, mime type, width, height
-    | AestasImage of byte[]*string*int*int
+    | AestasImage of {|data: byte[]; mimeType: string; width: int; height: int|}
     /// byte array, mime type, duration in seconds
-    | AestasAudio of byte[]*string*int
-    | AestasVideo of byte[]*string
+    | AestasAudio of {|data: byte[]; mimeType: string; duration: int|}
+    | AestasVideo of {|data: byte[]; mimeType: string; duration: int|}
     | AestasMention of AestasChatMember
     | AestasQuote of uint64
     | AestasFold of IMessageAdapterCollection
-    | ProtocolSpecifyContent of IProtocolSpecifyContent
+    /// byte array, mime type, file name
+    | AestasFile of {|data: byte[]; mimeType: string; fileName: string|}
+    | ProtocolContent of {|funcName: string; param: (string * string) list; content: string|}
 [<Struct>]
 type AestasMessage = {
     sender: AestasChatMember
@@ -215,10 +221,9 @@ type AestasMessage = {
     }
 type InputConverterFunc = IMessageAdapterCollection -> AestasContent -> string
 /// domain * params * content
-type 't ContentCtor = AestasBot -> AestasChatDomain -> (string*string) list -> string -> 't
+type 't ContentCtor = AestasBot -> AestasChatDomain -> (string * string) list -> string -> 't
 type OverridePluginFunc = AestasContent ContentCtor
 type ContentParser = Result<AestasContent, string> ContentCtor
-type ProtocolSpecifyContentCtor = Result<IProtocolSpecifyContent, string> ContentCtor
 type SystemInstructionBuilder = AestasBot -> StringBuilder -> unit
 type PrefixBuilder = AestasBot -> AestasMessage -> AestasMessage
 /// Bot class used in Aestas Core
@@ -227,10 +232,14 @@ type AestasBot() =
     let groups = AestasChatDomains()
     let extraData = Dictionary<string, obj>()
     let commandExecuters = Dictionary<string, CommandExecuter>()
+    let mutable model: ILanguageModelClient option = None
     let mutable originalSystemInstruction = ""
     /// Bot name, Default is "AestasBot"
-    member val Name: string = "AestasBot" with get, set
-    member val Model: ILanguageModelClient option = None with get, set
+    member val Name = "AestasBot" with get, set
+    member this.Model
+        with get() = model
+        and set value = Option.iter (fun x -> this.BindModel x) value
+
     member this.Domain
         with get domainId = groups[domainId]
         and set domainId (value: AestasChatDomain) =
@@ -247,7 +256,7 @@ type AestasBot() =
     member val ContextStrategy = StrategyContextReserveAll with get, set
     member val MemberCommandPrivilege: Dictionary<uint32, CommandPrivilege> = Dictionary() with get
     member val ContentParsers: Dictionary<string, struct(ContentParser*(AestasBot -> StringBuilder -> unit))> = Dictionary() with get
-    member val ProtocolContentCtorTips: Dictionary<string, struct(ProtocolSpecifyContentCtor*(AestasBot->string))> = Dictionary() with get
+    member val ProtocolContents: Dictionary<uint32, Dictionary<string, (AestasBot -> StringBuilder -> unit)>> = Dictionary() with get
     member val SystemInstructionBuilder: PipeLineChain<AestasBot*StringBuilder> option = None with get, set
     member val PrefixBuilder: PrefixBuilder option = None with get, set
     member _.ExtraData = extraData
@@ -256,7 +265,7 @@ type AestasBot() =
     member this.AddExtraData (key: string) (value: obj) = 
         if extraData.ContainsKey key then failwith "Key already exists"
         else extraData.Add(key, value)
-    member _.CommandExecuters = commandExecuters
+    member _.CommandExecuters = commandExecuters.AsReadOnly()
     member _.TryGetCommandExecuter key = 
         if commandExecuters.ContainsKey key then Some commandExecuters[key] else None
     member this.AddCommandExecuter key value =
@@ -265,6 +274,9 @@ type AestasBot() =
         else
             if commandExecuters.ContainsKey key then failwith "Key already exists"
             else commandExecuters.Add(key, value)
+    member this.RemoveCommandExecuter key =
+        if commandExecuters.Remove key then Ok ()
+        else Error "Key not found"
     member this.SystemInstruction 
         with get() = 
             match this.SystemInstructionBuilder with
@@ -285,10 +297,14 @@ type AestasBot() =
         | _ -> true
     member this.BindDomain (domain: AestasChatDomain) = 
         if groups.ContainsKey domain.DomainId then
-            groups[domain.DomainId].Bot <- None
+            groups[domain.DomainId].UnBind this
             groups[domain.DomainId] <- domain
         else groups.Add(domain.DomainId, domain)
-        domain.Bot <- Some this
+        domain.Bind this
+    member this.BindModel (model': ILanguageModelClient) = 
+        model |> Option.iter (fun x -> x.UnBind this) 
+        model <- Some model'
+        model'.Bind this
     member this.CheckContextLength (domain: AestasChatDomain) =
         async {
             match this.ContextStrategy, this.Model with
@@ -328,13 +344,13 @@ Format:
                 domain.Messages.Clear()
             | _ -> ()
         }
-    member this.ParseIMessageAdapter (message: IMessageAdapter) (domain: AestasChatDomain) (inQuote: bool) =
+    member this.ParseIMessageAdapter (domain: AestasChatDomain) (significant: bool) (message: IMessageAdapter) =
         let message = 
             match this.ContentLoadStrategy with
             | StrategyLoadNone -> message.ParseAsPlainText()
             | StrategyLoadAll ->  message.Parse()
             | StrategyLoadByPredicate p when p message -> message.Parse()
-            | StrategyLoadOnlyMentionedOrPrivate when message.Mention domain.Self.uid || domain.Private || inQuote -> message.Parse()
+            | StrategyLoadOnlyMentionedOrPrivate when message.Mention domain.Self.uid || domain.Private || significant -> message.Parse()
             | _ -> message.ParseAsPlainText()
         match this.PrefixBuilder with
         | Some build -> build this message
@@ -344,6 +360,7 @@ Format:
             do! this.CheckContextLength domain
             match this.Model, message.TryGetCommand this.CommandExecuters.Keys with
             | _ when groups.ContainsValue domain |> not -> return Error "This domain hasn't been added to this bot", ignore
+            | _ when message.SenderId |> this.IsFriend domain |> not -> return Ok [], ignore
             | _ when message.SenderId = domain.Self.uid -> return Ok [], ignore
             | _, Some(prefix, command)  ->
                 this.CommandExecuters[prefix].Execute {
@@ -357,14 +374,13 @@ Format:
                     } command
                 return Ok [], ignore
             | None, _ -> return Error "No model binded to this bot", ignore
-            | Some _, _ when message.SenderId |> this.IsFriend domain |> not -> return Ok [], ignore
             | Some model, _ ->
                 // check if illegal strategy
                 match this.MessageReplyStrategy, this.MessageCacheStrategy with
                 | StrategyReplyAll, StrategyCacheNone ->
                     failwith "Check your strategy, you can't reply to message without any cache"
                 | _ -> ()
-                let message' = this.ParseIMessageAdapter message domain false
+                let message' = this.ParseIMessageAdapter domain false message
                 let callback' =
                     let callback' (callback: AestasMessage -> unit) rmsg = 
                         domain.Messages.Add rmsg
@@ -470,6 +486,8 @@ let noneGenerationConfig = {
     }
 type CacheMessageCallback = AestasMessage -> unit
 type ILanguageModelClient =
+    abstract member Bind: bot : AestasBot -> unit
+    abstract member UnBind: bot : AestasBot -> unit
     /// bot -> domain -> message -> response * callback
     abstract member GetReply: bot: AestasBot -> domain: AestasChatDomain -> Async<Result<AestasContent list, string>*CacheMessageCallback>
     /// bot * domain * message -> unit, with a certain sender in AestasMessage, dont send the message
@@ -586,6 +604,8 @@ type VirtualDomain(send, recall, bot, user, domainId, domainName, isPrivate) as 
         }
 type UnitClient() =
     interface ILanguageModelClient with
+        member _.Bind bot = ()
+        member _.UnBind bot = ()
         member _.GetReply bot domain  = 
             async {
                 return Ok [], ignore
@@ -702,6 +722,8 @@ module ConsoleBot =
             member this.InitDomainView bot domainId = this.InitDomainView(bot, domainId)
     let singleton = ConsoleChat()
 module Builtin =
+    let inline domainToAccessibleDomain (domain: AestasChatDomain) =
+        if domain.Private then CommandAccessibleDomain.Private else CommandAccessibleDomain.Group
     let inline toString (o: obj) =
         match o with
         | :? int as i -> i.ToString()
@@ -715,20 +737,36 @@ module Builtin =
         | :? Type as t -> t.Name
         | _ -> o.GetType().Name
     let rec modelInputConverters (domain: AestasChatDomain) = function
+    | AestasBlank -> ""
     | AestasText x -> x
     | AestasImage _ -> "#[image: not supported]"
     | AestasAudio _ -> "#[audio: not supported]"
     | AestasVideo _ -> "#[video: not supported]"
+    | AestasFile _ -> "#[file: not supported]"
     | AestasMention x -> $"#[mention: {x.name}]"
     | AestasQuote x -> $"#[quote: {x}]"
     | AestasFold x -> $"#[foldedMessage: {x.Count} messages]"
-    | ProtocolSpecifyContent x -> x.ToPlainText()
-    | _ -> failwith "Could not handle this content type"
+    | ProtocolContent _ -> "<should not be here, maybe a bug>"
     let overridePrimCtor = dict' [
         "text", fun (domain: AestasChatDomain, param: (string*string) list, content) -> AestasText content
-        "image", fun (domain, param, content) -> AestasImage (Array.zeroCreate<byte> 0, "image/png", 0, 0)
-        "audio", fun (domain, param, content) -> AestasAudio (Array.zeroCreate<byte> 0, "audio/wav", 0)
-        "video", fun (domain, param, content) -> AestasVideo (Array.zeroCreate<byte> 0, "video/mp4")
+        "image", fun (domain, param, content) ->
+            AestasImage {|
+                data = Array.zeroCreate<byte> 0
+                mimeType = "image/png"
+                width = 0; height = 0
+                |}
+        "audio", fun (domain, param, content) -> 
+            AestasAudio {|
+                data = Array.zeroCreate<byte> 0
+                mimeType = "audio/mp3"
+                duration = 0
+                |}
+        "video", fun (domain, param, content) -> 
+            AestasVideo {|
+                data = Array.zeroCreate<byte> 0
+                mimeType = "video/mp4"
+                duration = 0
+                |}
         "mention", fun (domain, param, content) ->
             let content = content.Trim()
             match domain.Members |> Array.tryFind (fun x -> x.name = content) with
@@ -822,12 +860,14 @@ module Builtin =
                         content |> result.Add
                     | Error emsg ->
                         error $"<Error occured when parsing [{funcName}]: {emsg}>"
-                else if bot.ProtocolContentCtorTips.ContainsKey funcName then
-                    match fst' bot.ProtocolContentCtorTips[funcName] bot domain param content with
-                    | Ok content ->
-                        content |> ProtocolSpecifyContent |> result.Add
-                    | Error emsg ->
-                        error $"<Error occured when parsing [{funcName}]: {emsg}>"
+                else if 
+                    bot.ProtocolContents.ContainsKey domain.DomainId
+                    && bot.ProtocolContents[domain.DomainId].ContainsKey funcName then
+                    ProtocolContent {|
+                        funcName = funcName
+                        param = param
+                        content = content
+                        |} |> result.Add
                 else
                     error $"<Couldn't find function [{funcName}] with param: {param}, content: {content}>"
                     // log here
@@ -855,7 +895,10 @@ module Builtin =
             sb.Append("**").Append(name).AppendLine("**:") |> ignore
             tipBuilder bot sb
             sb.AppendLine("") |> ignore)
-        bot.ProtocolContentCtorTips |> Dict.iter (fun name struct(ctor, tip) -> sb.Append $"**{name}**:\n{tip bot}\n" |> ignore)
+        bot.ProtocolContents.Values |> Seq.iter (Dict.iter (fun name tipBuilder -> 
+            sb.Append("**").Append(name).AppendLine("**:") |> ignore
+            tipBuilder bot sb
+            sb.AppendLine("") |> ignore))
         bot, sb
     let buildPrefix (bot: AestasBot) (msg: AestasMessage) =
         {
@@ -888,9 +931,15 @@ module Builtin =
                 let name = cmd[0]
                 let args = cmd |> Array.skip 1
                 match Dict.tryGetValue name commands with
-                | Some cmd when cmd.privilege <= env.privilege -> 
-                    try cmd.execute this env args with ex -> env.log $"Error: {ex.Message}"
-                | Some _ -> env.log $"Permission denied"
+                | Some cmd-> 
+                    match 
+                        cmd.privilege <= env.privilege,
+                        domainToAccessibleDomain env.domain &&& cmd.accessibleDomain <> CommandAccessibleDomain.None
+                    with
+                    | _, false -> env.log $"Command {name} not found"
+                    | false, _ -> env.log $"Permission denied"
+                    | _ ->
+                        try cmd.execute this env args with ex -> env.log $"Error: {ex.Message}"
                 | None -> env.log $"Command {name} not found"
     let versionCommand() = {
         name = "version"
@@ -918,29 +967,60 @@ module Builtin =
             let sb = StringBuilder()
             sb.Append "## Commands" |> ignore
             executer.Commands |>
-            ArrList.iter (fun v -> sb.Append $"\n* {v.name}:\n   {v.description}" |> ignore)
+            ArrList.iter (fun v ->
+                if domainToAccessibleDomain env.domain &&& v.accessibleDomain <> CommandAccessibleDomain.None then 
+                    sb.Append $"\n* {v.name}:\n   {v.description}" |> ignore)
             sb.ToString() |> env.log
         }
     let echoCommand() = {
         name = "echo"
-        description = "Repeat the input"
+        description = "Repeat the input. Use --file to redirect the output to a file"
         accessibleDomain = CommandAccessibleDomain.All
         privilege = CommandPrivilege.Normal
         execute = fun executer env args ->
+            let mode = args.Contains "--file"
+            let args = 
+                if mode then args |> Array.removeAt (args |> Array.findIndex (( = ) "--file"))
+                else args
             let sb = StringBuilder()
-            args |> Array.iter (fun x -> sb.Append x |> ignore)
-            sb.ToString() |> env.log
+            args |> Array.iter (fun x -> sb.AppendLine x |> ignore)
+            if sb.Length <> 0 then sb.Remove(sb.Length - 1, 1) |> ignore
+            if mode then
+                use ms = new MemoryStream()
+                use writer = new StreamWriter(ms, Encoding.UTF8)
+                writer.Write(sb.ToString())
+                writer.Flush()
+                AestasFile {|
+                    data = ms.ToArray()
+                    mimeType = "text/plain"
+                    fileName = "echo.txt"
+                    |}
+                |> List.singleton
+                |> env.domain.Send ignore
+                 |> Async.Ignore |> Async.Start
+            else sb.ToString() |> env.log
+        }
+    let lsexecCommand() = {
+        name = "lsexec"
+        description = "List all executers"
+        accessibleDomain = CommandAccessibleDomain.Group
+        privilege = CommandPrivilege.Normal
+        execute = fun executer env args ->
+            env.bot.CommandExecuters
+            |> Seq.map (fun p -> sprintf "%s: %s" p.Key (p.Value.GetType().Name))
+            |> String.concat "\n"
+            |> env.log
         }
     let lsfrwlCommand() = {
         name = "lsfrwl"
-        description = "List Friend White List"
-        accessibleDomain = CommandAccessibleDomain.All
+        description = "List friend whitelist"
+        accessibleDomain = CommandAccessibleDomain.Group
         privilege = CommandPrivilege.High
         execute = fun executer env args ->
             match env.bot.FriendStrategy with
             | StrategyFriendWhitelist wl ->
                 let sb = StringBuilder()
-                sb.AppendLine "## White List" |> ignore
+                sb.AppendLine "## Whitelist" |> ignore
                 if wl.ContainsKey env.domain.DomainId then
                     wl[env.domain.DomainId] |> Set.iter (fun x -> 
                         match env.domain.Members |> Array.tryFind (fun y -> y.uid = x) with
@@ -951,14 +1031,14 @@ module Builtin =
         }
     let lsfrblCommand() = {
         name = "lsfrbl"
-        description = "List Friend Black List"
-        accessibleDomain = CommandAccessibleDomain.All
+        description = "List friend Blacklist"
+        accessibleDomain = CommandAccessibleDomain.Group
         privilege = CommandPrivilege.High
         execute = fun executer env args ->
             match env.bot.FriendStrategy with
             | StrategyFriendBlacklist bl ->
                 let sb = StringBuilder()
-                sb.AppendLine "## Black List" |> ignore
+                sb.AppendLine "## Blacklist" |> ignore
                 if bl.ContainsKey env.domain.DomainId then
                     bl[env.domain.DomainId] |> Set.iter (fun x -> 
                         match env.domain.Members |> Array.tryFind (fun y -> y.uid = x) with
@@ -969,8 +1049,8 @@ module Builtin =
         }
     let ufrwlCommand() = {
         name = "ufrwl"
-        description = "Update Friend White List"
-        accessibleDomain = CommandAccessibleDomain.All
+        description = "Update friend whitelist"
+        accessibleDomain = CommandAccessibleDomain.Group
         privilege = CommandPrivilege.High
         execute = fun executer env args ->
             let rec go wl i =
@@ -1005,8 +1085,8 @@ module Builtin =
         }
     let ufrblCommand() = {
         name = "ufrbl"
-        description = "Update Friend Black List"
-        accessibleDomain = CommandAccessibleDomain.All
+        description = "Update friend blacklist"
+        accessibleDomain = CommandAccessibleDomain.Group
         privilege = CommandPrivilege.High
         execute = fun executer env args ->
             let rec go wl i =
@@ -1045,6 +1125,7 @@ module Builtin =
             clearCommand()
             helpCommand()
             echoCommand()
+            lsexecCommand()
             lsfrwlCommand()
             lsfrblCommand()
             ufrwlCommand()
@@ -1053,7 +1134,7 @@ module Builtin =
 module AestasBot =
     let inline tryGetModel (bot: AestasBot) = bot.Model
     let inline bindModel (bot: AestasBot) model =
-        bot.Model <- Some model
+        bot.BindModel model
     let inline bindDomain (bot: AestasBot) domain =
         bot.BindDomain domain
     let inline addExtraData (bot: AestasBot) (key: string) (value: obj) =
@@ -1062,10 +1143,10 @@ module AestasBot =
     //    (Builtin.operators.Values |> List.ofSeq) @ (Builtin.commands.Values |> List.ofSeq)
     let inline addCommandExecuter (bot: AestasBot) key executer =
         bot.AddCommandExecuter key executer
+    let inline removeCommandExecuter (bot: AestasBot) key =
+        bot.RemoveCommandExecuter key
     let inline addContentParser (bot: AestasBot) (ctor: ContentParser, name: string, tip: AestasBot -> StringBuilder -> unit) =
         bot.ContentParsers.Add(name, (ctor, tip))
-    let inline addProtocolContentCtorTip (bot: AestasBot) (ctor: ProtocolSpecifyContentCtor, name: string, tip: AestasBot -> string) =
-        bot.ProtocolContentCtorTips.Add(name, (ctor, tip))
     let inline updateExtraData (bot: AestasBot) (key: string) (value: obj) =
         bot.ExtraData[key] <- value
     // let inline updateCommand (bot: AestasBot) key executer =
@@ -1078,8 +1159,6 @@ module AestasBot =
         cmds |> List.iter (fun (k, v) -> bot.AddCommandExecuter k v)
     let inline addContentParsers (bot: AestasBot) contentParsers =
         contentParsers |> List.iter (addContentParser bot)
-    let inline addProtocolContentCtorTips (bot: AestasBot) ctorTips =
-        ctorTips |> List.iter (addProtocolContentCtorTip bot)
     let inline addSystemInstruction (bot: AestasBot) systemInstruction =
         bot.SystemInstruction <- systemInstruction
     let inline addSystemInstructionBuilder (bot: AestasBot) systemInstructionBuilder =
@@ -1109,7 +1188,7 @@ module AestasBot =
         let bot = AestasBot()
         let ``set?`` (target: 't -> unit) = function Some x -> target x | None -> ()
         bot.Name <- botParam.name
-        bot.Model <- Some botParam.model
+        bot.BindModel botParam.model
         ``set?`` bot.set_SystemInstruction botParam.systemInstruction
         bot.SystemInstructionBuilder <- botParam.systemInstructionBuilder
         ``set?`` bot.set_FriendStrategy botParam.friendStrategy

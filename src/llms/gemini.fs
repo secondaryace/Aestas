@@ -10,8 +10,11 @@ open System.Text.Json
 open Aestas
 open Aestas.Prim
 open Aestas.Core
+open Aestas.Core.Builtin
 open Aestas.Core.Logger
+open Aestas.Core.AestasBot
 open System.Diagnostics
+
 module Gemini =
     type GText = {text: string}
     type _GInlineData = {mime_type: string; data: string}
@@ -88,8 +91,8 @@ module Gemini =
         let rec parseContents (bot: AestasBot) (domain: AestasChatDomain) (contents: AestasContent list) =
             let parts = arrList<GPart>()
             let parse i = function
-            | AestasImage(bs, mime, w, h) -> 
-                parts.Add <| InlineData {inline_data = {mime_type = mime; data = bs |> Convert.ToBase64String}}
+            | AestasImage img -> 
+                parts.Add <| InlineData {inline_data = {mime_type = img.mimeType; data = img.data |> Convert.ToBase64String}}
             | AestasQuote mid ->
                 match contentsCache[domain] |> ArrList.tryFindBack (snd' >> (=) mid) with
                 | Some (msg, _) when msg.role = "model" -> 
@@ -101,16 +104,48 @@ module Gemini =
                     match domain.Messages |> IList.tryFindBack (fun m -> m.MessageId = mid) with
                     | Some msgAdapter ->
                         parts.Add <| Text {text = "#[quote:" }
-                        ((bot.ParseIMessageAdapter msgAdapter domain true).contents 
+                        ((bot.ParseIMessageAdapter domain true msgAdapter).contents 
                         |> parseContents bot domain).parts |> parts.AddRange
                         parts.Add <| Text {text = "]" }
                     | _ -> parts.Add <| Text {text = "#[quote: ...]" }
                 | None -> parts.Add <| Text {text = "#[quote: ...]" }
+            | AestasFold ms ->
+                if ms.Count < 15 then
+                    parts.Add <| Text {text = "#[fold:" }
+                    ms |> IList.map (fun m ->
+                        bot.ParseIMessageAdapter domain true m
+                        |> _.contents
+                        |> parseContents bot domain 
+                        |> _.parts)
+                    |> IList.iter parts.AddRange
+                    parts.Add <| Text {text = "]" }
+                else parts.Add <| Text {text = $"#[fold: {ms.Count} messages]" }
             | x -> 
-                parts.Add <| Text {text = Builtin.modelInputConverters domain x}// !
+                parts.Add <| Text {text = modelInputConverters domain x}// !
             contents |> List.iteri parse
             {role = "user"; parts = parts}
+        
+        let dumpCommand() = {
+            name = "dump"
+            description = "Dump cached context of gemini"
+            accessibleDomain = CommandAccessibleDomain.All
+            privilege = CommandPrivilege.Normal
+            execute = fun executer env args -> 
+                let sb = StringBuilder()
+                sb.Append "## Gemini Context" |> ignore
+                contentsCache 
+                |> Dict.tryGetValue env.domain 
+                |> Option.iter (fun x ->
+                    x |>
+                    ArrList.iter (fun struct(content, mid) ->
+                        sprintf "\n*%d\n  %A" mid content |> sb.Append |> ignore))
+                sb.ToString() |> env.log
+            }
         interface ILanguageModelClient with
+            member this.Bind bot =
+                addCommandExecuter bot "\\gemini:" (SpacedTextCommandExecuter([dumpCommand(); helpCommand()]))
+            member this.UnBind bot =
+                removeCommandExecuter bot "\\gemini:" |> ignore
             member this.CacheMessage bot domain message =
                 if contentsCache.ContainsKey domain |> not then contentsCache.Add(domain, arrList())
                 contentsCache[domain].Add struct(message.contents |> parseContents bot domain, message.mid)
@@ -138,7 +173,7 @@ module Gemini =
                             with ex -> 
                                 logErrorf[0] "Gemini response parse failed: %A, %s" ex result
                                 "..."
-                        return response.TrimEnd() |> Builtin.modelOutputParser bot domain |> Ok, 
+                        return response.TrimEnd() |> bot.ModelOutputParser bot domain |> Ok, 
                         fun msg -> 
                             contentsCache[domain].Insert(countCache, struct({role = "model"; parts = [|Text {text = response}|]}, msg.mid))
                     | Error result ->

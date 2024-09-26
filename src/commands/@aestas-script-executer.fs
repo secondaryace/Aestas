@@ -17,9 +17,13 @@ module rec AestasScript =
         execute: AestasScriptExecuter -> CommandEnvironment -> Context -> Value list -> Context * Value
     }
     let privWrapper cmd executer (env: CommandEnvironment) ctx args =
-        if env.privilege < cmd.privilege then
-            env.log "Permission denied"; ctx, Tuple []
-        else cmd.execute executer env ctx args
+        match 
+            cmd.privilege <= env.privilege,
+            Builtin.domainToAccessibleDomain env.domain &&& cmd.accessibleDomain <> CommandAccessibleDomain.None
+        with
+        | _, false -> env.log "Domain not allowed"; ctx, Tuple []
+        | false, _ -> env.log "Permission denied"; ctx, Tuple []
+        | _ -> cmd.execute executer env ctx args
     type AestasScriptExecuter(commands') =
         inherit CommandExecuter<AestasScriptCommand>(commands')
         let commands = Dictionary<string, AestasScriptCommand>()
