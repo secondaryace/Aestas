@@ -46,7 +46,8 @@ module Gemini =
     type GCandidate = {
         content: GContent
         finishReason: string
-        index: int
+        // let it be optional for 002 models
+        index: int option
         safetyRatings: GSafetyRatting[]
         }
     type GResponse = {candidates: GCandidate[]}
