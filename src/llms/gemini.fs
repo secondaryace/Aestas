@@ -78,7 +78,7 @@ module Gemini =
                 return Ok result
             else return Error result
         }
-    type GeminiLlm (profile: GProfile, model: string) =
+    type GeminiLlm (profile: GProfile, model: string) as this =
         let generationConfig = 
             match profile.generation_configs with
             | None -> None
@@ -142,9 +142,22 @@ module Gemini =
                         sprintf "\n*%d\n  %A" mid content |> sb.Append |> ignore))
                 sb.ToString() |> env.log
             }
+        let switchCommand() = {
+            name = "switch"
+            description = "Switch the model of gemini"
+            accessibleDomain = CommandAccessibleDomain.All
+            privilege = CommandPrivilege.Normal
+            execute = fun executer env args -> 
+                match args with
+                | [|model|] ->
+                    this.Model <- model
+                    env.log $"Switched to model: {model}"
+                | _ -> env.log "Usage: switch <model>"
+            }
+        member val Model = model with get, set
         interface ILanguageModelClient with
             member this.Bind bot =
-                addCommandExecuter bot "\\gemini:" (SpacedTextCommandExecuter([dumpCommand(); helpCommand()]))
+                addCommandExecuter bot "\\gemini:" (SpacedTextCommandExecuter([dumpCommand(); switchCommand(); helpCommand()]))
             member this.UnBind bot =
                 removeCommandExecuter bot "\\gemini:" |> ignore
             member this.CacheMessage bot domain message =
@@ -157,7 +170,7 @@ module Gemini =
                 async {
                     let countCache = contentsCache[domain].Count
                     let! response = 
-                        let apiLink = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
+                        let apiLink = $"https://generativelanguage.googleapis.com/v1beta/models/{this.Model}:generateContent"
                         let temp = Array.init (contentsCache[domain].Count) (fun i -> fst' (contentsCache[domain][i]))
                         let system =
                             {role = "system"; parts = [|Text {text = bot.SystemInstruction}|]}

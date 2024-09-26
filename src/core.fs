@@ -791,7 +791,8 @@ module Builtin =
         // state index bracketLevel funcName param
         // state 0 -> funcName
         // state 1 -> param
-        // state 2 -> content
+        // state 2 -> contentStart
+        // state 3 -> content
         let rec scanBracket s i v f p =
             match botOut[i] with
             | '@' when s = 0 ->
@@ -815,6 +816,11 @@ module Builtin =
             | ']' -> 
                 cache.Append ']' |> ignore
                 scanBracket s (i+1) (v-1) f p
+            | ' ' when s = 2 -> scanBracket 2 (i+1) v f p
+            | _ when s = 2 ->
+                cache.Append botOut[i] |> ignore
+                if i+1 = botOut.Length then i+1, f, p, cache.ToString(), cache.Clear() |> ignore 
+                else scanBracket 3 (i+1) v f p
             | _ ->
                 cache.Append botOut[i] |> ignore
                 if i+1 = botOut.Length then i+1, f, p, cache.ToString(), cache.Clear() |> ignore 
