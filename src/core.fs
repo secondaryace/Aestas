@@ -189,14 +189,6 @@ type BotInterestCurve =
     | CurveInterestTruncateAfterTime of int
     /// Use your own function to determine interest
     | CurveInterestFunction of (int<sec> -> int)
-/// Used in Model <-> Aestas.Core <-> Protocol
-/// Provide extra content type. For example, market faces in QQ
-type IProtocolSpecifyContent =
-    /// .NET type of this content
-    abstract member Type: Type with get
-    abstract member ToPlainText: unit -> string
-    /// Convert this to something that only protocol can understand
-    abstract member Convert: AestasBot -> AestasChatDomain -> obj option
 [<Struct>]
 type AestasChatMember = {uid: uint32; name: string}
 type AestasContent = 
@@ -239,7 +231,6 @@ type AestasBot() =
     member this.Model
         with get() = model
         and set value = Option.iter (fun x -> this.BindModel x) value
-
     member this.Domain
         with get domainId = groups[domainId]
         and set domainId (value: AestasChatDomain) =
@@ -265,6 +256,9 @@ type AestasBot() =
     member this.AddExtraData (key: string) (value: obj) = 
         if extraData.ContainsKey key then failwith "Key already exists"
         else extraData.Add(key, value)
+    member this.RemoveExtraData key =
+        if extraData.Remove key then Ok ()
+        else Error "Key not found"
     member _.CommandExecuters = commandExecuters.AsReadOnly()
     member _.TryGetCommandExecuter key = 
         if commandExecuters.ContainsKey key then Some commandExecuters[key] else None
@@ -285,7 +279,8 @@ type AestasBot() =
                 (b.Invoke(this, sb) |> snd).ToString()
             | None -> originalSystemInstruction
         and set value = originalSystemInstruction <- value
-    member this.IsFriend (domain: AestasChatDomain) uid =
+    member this.HasFriend (domain: AestasChatDomain) uid =
+        if domain.Private then true else
         match this.FriendStrategy with
         | StrategyFriendAll -> true
         | StrategyFriendNone -> false
@@ -360,7 +355,7 @@ Format:
             do! this.CheckContextLength domain
             match this.Model, message.TryGetCommand this.CommandExecuters.Keys with
             | _ when groups.ContainsValue domain |> not -> return Error "This domain hasn't been added to this bot", ignore
-            | _ when message.SenderId |> this.IsFriend domain |> not -> return Ok [], ignore
+            | _ when message.SenderId |> this.HasFriend domain |> not -> return Ok [], ignore
             | _ when message.SenderId = domain.Self.uid -> return Ok [], ignore
             | _, Some(prefix, command)  ->
                 this.CommandExecuters[prefix].Execute {
@@ -471,7 +466,7 @@ type GenerationConfig = {
 let defaultGenerationConfig = {
     temperature = Some 0.95
     maxLength = Some 1024
-    topK = Some 64
+    topK = None
     topP = None
     frequencyPenalty = None
     stop = None
@@ -1006,14 +1001,27 @@ module Builtin =
                  |> Async.Ignore |> Async.Start
             else sb.ToString() |> env.log
         }
+    let lsprivCommand() = {
+        name = "lspriv"
+        description = "List user privileges"
+        accessibleDomain = CommandAccessibleDomain.All
+        privilege = CommandPrivilege.Normal
+        execute = fun executer env args ->
+            env.bot.MemberCommandPrivilege
+            |> Seq.map (fun p -> 
+                sprintf "`%d`: %A" p.Key p.Value)
+            |> Seq.append [sprintf "`default`: %A" CommandPrivilege.Normal]
+            |> String.concat "\n"
+            |> env.log
+        }
     let lsexecCommand() = {
         name = "lsexec"
         description = "List all executers"
-        accessibleDomain = CommandAccessibleDomain.Group
+        accessibleDomain = CommandAccessibleDomain.All
         privilege = CommandPrivilege.Normal
         execute = fun executer env args ->
             env.bot.CommandExecuters
-            |> Seq.map (fun p -> sprintf "%s: %s" p.Key (p.Value.GetType().Name))
+            |> Seq.map (fun p -> sprintf "`%s`: %s" p.Key (p.Value.GetType().Name))
             |> String.concat "\n"
             |> env.log
         }
@@ -1127,10 +1135,11 @@ module Builtin =
         }
 
     let commands() = [
+            helpCommand()
             versionCommand()
             clearCommand()
-            helpCommand()
             echoCommand()
+            lsprivCommand()
             lsexecCommand()
             lsfrwlCommand()
             lsfrblCommand()

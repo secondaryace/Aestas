@@ -399,14 +399,17 @@ module rec AestasLagrangeBot =
                             let chat = pair.Value[event.GroupUin]
                             match chat.Bot with
                             | None -> ()
-                            | Some bot ->
+                            | Some abot when 
+                                event.TargetUin = bot.BotUin &&
+                                abot.HasFriend chat event.TargetUin ->
                                 chat.Members 
                                 |> Array.tryFind (fun m -> m.uid = event.OperatorUin)
                                 |> Option.iter (fun m ->
                                     m.name
                                     |> sprintf "（%s戳了戳你）"
                                     |>  AestasText |> List.singleton |> Some 
-                                    |> bot.SelfTalk chat |> Async.RunSynchronously |> ignore)// notice: shouldnt ignore
+                                    |> abot.SelfTalk chat |> Async.RunSynchronously |> ignore)// notice: shouldnt ignore
+                            | _ -> ()
                     )
                 ) |> bot.Invoker.add_OnGroupPokeEvent
             member _.FetchDomains() = 

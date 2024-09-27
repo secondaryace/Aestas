@@ -48,8 +48,8 @@ module AutoInit =
         | ProtocolPlugin = 1
         | ContentParser = 2
         | Command = 3
-    let mutable _initializers: (InitTypes * (unit -> unit)) array option = None
-    let _init (initTypes: Set<InitTypes>) =
+    let mutable internal _initializers: (InitTypes * (unit -> unit)) array option = None
+    let internal _init (initTypes: Set<InitTypes>) =
         logInfo["AutoInit"] "Initializing"
         if Set.contains InitTypes.Ignore initTypes then failwith "Ignore is not allowed in initTypes"
         if Directory.Exists "extensions" then
